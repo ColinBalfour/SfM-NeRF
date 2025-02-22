@@ -1,1 +1,1 @@
-# SfM-NeRF
+# README
