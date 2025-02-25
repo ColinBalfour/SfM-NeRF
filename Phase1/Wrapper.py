@@ -171,7 +171,7 @@ def estimate_fundamental_matrix(pts1, pts2):
     return F
 
 
-def reject_outliers(kp1, kp2, dmatches, N=5000, threshold=.01):
+def reject_outliers(kp1, kp2, dmatches, N=15000, threshold=.005):
     """
     Reject outliers using RANSAC.
     """
@@ -215,16 +215,10 @@ def reject_outliers(kp1, kp2, dmatches, N=5000, threshold=.01):
             best_F = F
 
     print(f"RANSAC: Found {len(best_inliers)} inliers out of {len(pts1)} matches.")
-    final_pts1 = pts1[best_inliers]
-    final_pts2 = pts2[best_inliers]
-    print("length of final points", len(final_pts1), len(final_pts2))
-    indices = np.random.choice(len(final_pts1), 8, replace=False)
-    final_pts1_sample = final_pts1[indices]
-    final_pts2_sample = final_pts2[indices]
-    #recomputed_F = estimate_fundamental_matrix(pts1[best_inliers], pts2[best_inliers])
-    recomputed_F = estimate_fundamental_matrix( final_pts1_sample, final_pts2_sample)
-    print("recomputed F:", recomputed_F)
-    return best_F, best_inliers, recomputed_F, final_pts1, final_pts2
+    
+    recomputed_F = estimate_fundamental_matrix(pts1[best_inliers], pts2[best_inliers])
+    return recomputed_F, best_inliers
+
 
 
 def get_essential_mtx(K, F):
@@ -303,39 +297,37 @@ def get_camera_pose(E):
 #
 #     return X_best, best_R, best_T, X_all
 
+def get_skew_mat(a):
+    return np.array([
+        [0, -a[2], a[1]],
+        [a[2], 0, -a[0]],
+        [-a[1], a[0], 0]
+    ])
+
 def linear_triangulation(K, R, T, pose, final_pts1, final_pts2):
     I = np.identity(3)
     P1 = np.dot(K, np.dot(R, np.hstack((I, -T))))
     X_all = []  # List to store points for all four solutions
-    X_best = []
-    best_R = None
-    best_T = None
-
-    # Pre-compute first camera projection matrix rows
-    P_1_r = P1[0, :].reshape(1, 4)
-    P_2_r = P1[1, :].reshape(1, 4)
-    P_3_r = P1[2, :].reshape(1, 4)
+    
+    best_pose = 0
 
     for (C, R2) in pose:
         X_current = []  # Points for current solution
+        positive_Z = 0
         C = C.reshape(3, 1)
         P2 = np.dot(K, np.dot(R2, np.hstack((I, -C))))
-
-        # Pre-compute second camera projection matrix rows
-        P2_1_r = P2[0, :].reshape(1, 4)
-        P2_2_r = P2[1, :].reshape(1, 4)
-        P2_3_r = P2[2, :].reshape(1, 4)
 
         for i, (p1, p2) in enumerate(zip(final_pts1, final_pts2)):
             x1, y1 = p1
             x2, y2 = p2
+            
+            p1 = np.array([x1, y1, 1])
+            p2 = np.array([x2, y2, 1])
 
             # Construct linear system A for current point
             A = np.vstack([
-                y1 * P_3_r - P_2_r,
-                P_1_r - x1 * P_3_r,
-                y2 * P2_3_r - P2_2_r,
-                P2_1_r - x2 * P2_3_r
+                get_skew_mat(p1) @ P1,
+                get_skew_mat(p2) @ P2
             ])
 
             # Solve using SVD
@@ -348,20 +340,22 @@ def linear_triangulation(K, R, T, pose, final_pts1, final_pts2):
 
             # Check cheirality condition
             r3 = R2[:, 2]
-            if np.dot(r3, (X_3d - C.flatten())) > 0:
-                best_R = R2
-                best_T = C
-
-                X_best.append(X_3d)
+            if np.dot(r3, (X_3d - C.flatten())) > 0 and X_3d[2] > 0:
+                positive_Z += 1
 
         # Add all points for current solution to X_all
         X_all.append(X_current)
+        if positive_Z > best_pose:
+            best_pose = positive_Z
+            X_best = X_current
+            best_R = R2
+            best_T = C
 
     # Convert lists to numpy arrays
-    X_best = np.array(X_best) if X_best else np.empty((0, 3))
-    X_al = np.array(X_all)
+    X_best = np.array(X_best)
+    X_all = np.array(X_all)
 
-    return X_best, best_R, best_T, X_al, X_all
+    return X_best, best_R, best_T, X_all
 
 
 
@@ -553,7 +547,8 @@ def plot_dual_view_triangulation(all_world_points):
 
 def main():
     # Set data folder and number of images
-    path = "D:/Computer vision/Homeworks/5. Project 2 - Phase1/YourDirectoryID_p2 (1)/YourDirectoryID_p2/Phase1/P2Data/P2Data/Data"
+    # path = "D:/Computer vision/Homeworks/5. Project 2 - Phase1/YourDirectoryID_p2 (1)/YourDirectoryID_p2/Phase1/P2Data/P2Data"
+    path = "Data"
     num_imgs = 5
 
     # Load images (which are already undistorted and resized to 800x600px)
@@ -563,8 +558,7 @@ def main():
         return
 
     # Load camera calibration parameters (intrinsic matrix K) if needed
-    path2 = "D:/Computer vision/Homeworks/5. Project 2 - Phase1/YourDirectoryID_p2 (1)/YourDirectoryID_p2/Phase1/P2Data/P2Data"
-    calib_file = os.path.join(path2, "calibration.txt")
+    calib_file = os.path.join(path, "calibration.txt")
     try:
         K = load_calibration(calib_file)
         print("Camera intrinsic matrix K:")
@@ -574,7 +568,7 @@ def main():
         return
 
     # Load matching data for image1 from matching1.txt
-    matching_file = os.path.join(path2, "matching1.txt")
+    matching_file = os.path.join(path, "matching1.txt")
     try:
         _, matches = parse_matching_file(matching_file)
     except Exception as e:
@@ -590,19 +584,17 @@ def main():
     display_matches(images[0], images[target_img_id - 1], kp1, kp2, dmatches)
 
     # Estimate the fundamental matrix
-    F_old, inliers, F,fpts1, fpts2 = reject_outliers(kp1, kp2, dmatches)
-    print("old_F", F_old)
-    print("Final F", F)
+    F, inliers = reject_outliers(kp1, kp2, dmatches)
 
     print("Estimated fundamental matrix F:")
     print(F)
 
-    print("Inliers:", inliers)
-    print("number of inliers :" , len(inliers))
-
     # Display the inlier matches using cv2.drawMatches
     inlier_matches = [dmatches[i] for i in inliers]
     display_matches(images[0], images[target_img_id - 1], kp1, kp2, inlier_matches)
+    
+    fpts1 = np.array([kp1[m.queryIdx].pt for m in inlier_matches])
+    fpts2 = np.array([kp2[m.trainIdx].pt for m in inlier_matches])
 
     E = get_essential_mtx(K, F)
     print("Estimated essential matrix E:")
@@ -615,16 +607,20 @@ def main():
     # Rotation and translation of base frame
     R = np.identity(3)
     T = np.zeros((3,1))
-    world_points = []
-    X_final, R_final, T_final, all_world_points, wp= linear_triangulation(K, R, T, pose, fpts1, fpts2)
+
+    X_final, R_final, T_final, all_world_points = linear_triangulation(K, R, T, pose, fpts1, fpts2)
     print("best_R", R_final)
     print("best_T", T_final)
+    print(all_world_points.shape)
     plot_dual_view_triangulation(all_world_points)
-    X = wp[3]
-    print("X:", X)
+    X = all_world_points[3]
+    # print("X:", X)
     print("length of X:", len(X))
-    Y = non_linear_triangulation(K, R, T, R_final, T_final, fpts1, fpts2, X)
-    Y_opt = np.array(Y)
+    X_optimized = non_linear_triangulation(K, R, T, R_final, T_final, fpts1, fpts2, X_final)
+    X_optimized = np.array(X_optimized)
+    
+    plot_dual_view_triangulation(np.array([X_optimized, X_final]))
+    
 
 
 
