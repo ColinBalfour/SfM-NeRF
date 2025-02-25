@@ -476,72 +476,118 @@ def non_linear_triangulation(K, R1, T1, R2, T2, finalpts1, finalpts2, X):
 #
 #     return
 
-def plot_dual_view_triangulation(all_world_points):
+def plot_dual_view_triangulation(all_world_points, pose=None):
     """
     Create side-by-side plots showing X vs Y (front view) and X vs Z (top view)
     of world points from all four possible triangulation solutions.
+    
+    R_list, T_list are iterables (lists) of rotation matrices and translation
+    vectors for multiple camera poses.
     """
     import matplotlib.pyplot as plt
     import numpy as np
 
-    # Create figure with two subplots side by side
+    # -- 1. Prepare figure with two subplots side by side --
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
 
-    # Colors for different solutions
+    # Colors for different solutions (assuming all_world_points is a list of sets of 3D points)
     colors = ['blue', 'red', 'green', 'cyan']
-
-    # Plot points in both views
+    
+    # -- 2. Plot the triangulated points in both views --
     for i, points in enumerate(all_world_points):
         points = np.array(points)
 
         # Front view (X vs Y)
-        ax1.scatter(points[:, 0], points[:, 1],  # X vs Y coordinates
-                    c=colors[i], s=1, alpha=0.5,
+        ax1.scatter(points[:, 0], points[:, 1],
+                    c=colors[i % len(colors)], s=1, alpha=0.5,
                     label=f'Solution {i + 1}')
 
         # Top view (X vs Z)
-        ax2.scatter(points[:, 0], points[:, 2],  # X vs Z coordinates
-                    c=colors[i], s=1, alpha=0.5)
+        ax2.scatter(points[:, 0], points[:, 2],
+                    c=colors[i % len(colors)], s=1, alpha=0.5)
 
-    # Set labels and titles
+    
+    # -- 3. Loop through each camera pose and plot it --
+    if pose is not None:
+        R_list = [R for C, R in pose]
+        T_list = [C for C, R in pose]
+        
+        
+        #    Prepare a colormap for multiple camera poses --
+        #    This creates N distinct colors if we have N cameras.
+        num_cameras = len(R_list)
+        camera_colors = plt.cm.rainbow(np.linspace(0, 1, num_cameras))
+        
+        for i, (R, T) in enumerate(zip(R_list, T_list)):
+            # Camera center in world coordinates: C = -R^T * T
+            print(R.shape, T.shape)
+            camera_center = -R.T @ T.reshape(-1)
+
+            # Plot camera center in both views
+            ax1.scatter(camera_center[0], camera_center[1],
+                        marker='s', c=[camera_colors[i]], s=80,
+                        label=f'Camera {i+1}')
+            ax2.scatter(camera_center[0], camera_center[2],
+                        marker='s', c=[camera_colors[i]], s=80)
+
+            # Draw a small axis or "look" direction to indicate camera orientation.
+            # Typically the camera looks along the local Z-axis, i.e. R[:, 2] in world.
+            scale = 0.1  # Adjust for visibility
+            camera_look_dir = R[:, 2]
+            look_endpoint = camera_center + scale * camera_look_dir
+
+            # Front view (X vs Y)
+            ax1.plot(
+                [camera_center[0], look_endpoint[0]],
+                [camera_center[1], look_endpoint[1]],
+                color=camera_colors[i],
+                linewidth=2
+            )
+
+            # Top view (X vs Z)
+            ax2.plot(
+                [camera_center[0], look_endpoint[0]],
+                [camera_center[2], look_endpoint[2]],
+                color=camera_colors[i],
+                linewidth=2
+            )
+
+    # -- 5. Set labels, titles, grid, aspect ratio --
     ax1.set_xlabel('X')
     ax1.set_ylabel('Y')
     ax1.set_title('Front View (X vs Y)')
+    ax1.grid(True, linestyle='--', alpha=0.3)
+    ax1.axis('equal')
 
     ax2.set_xlabel('X')
     ax2.set_ylabel('Z')
     ax2.set_title('Top View (X vs Z)')
-
-    # Add grid to both plots
-    ax1.grid(True, linestyle='--', alpha=0.3)
     ax2.grid(True, linestyle='--', alpha=0.3)
-
-    # Set equal aspect ratio for both plots
-    ax1.axis('equal')
     ax2.axis('equal')
 
-    # Add legend to the first plot only
-    ax1.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+    # -- 6. Combine and reduce duplicate legend entries on ax1 --
+    handles, labels = ax1.get_legend_handles_labels()
+    # Using dict trick to remove duplicates while preserving order
+    unique = dict(zip(labels, handles))
+    ax1.legend(unique.values(), unique.keys(), bbox_to_anchor=(1.05, 1), loc='upper left')
 
-    # Adjust layout to prevent overlap
+    # -- 7. Adjust layout to prevent overlap --
     plt.tight_layout()
 
-    # Set reasonable axis limits to focus on the structure
+    # -- 8. Optionally set some padding around data in both axes --
     for ax in [ax1, ax2]:
         xlim = ax.get_xlim()
         ylim = ax.get_ylim()
-        # Calculate the range of the data
         x_range = xlim[1] - xlim[0]
         y_range = ylim[1] - ylim[0]
-        # Add some padding (10% of the range)
         x_padding = x_range * 0.1
         y_padding = y_range * 0.1
-        # Set new limits
         ax.set_xlim(xlim[0] - x_padding, xlim[1] + x_padding)
         ax.set_ylim(ylim[0] - y_padding, ylim[1] + y_padding)
 
-    # Show the plot
+    # -- 9. Show the final figure --
     plt.show()
+
 
 
 
