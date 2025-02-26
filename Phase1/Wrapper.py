@@ -4,7 +4,8 @@ import os
 import matplotlib.pyplot as plt
 import scipy.optimize
 from scipy.optimize import least_squares
-
+from scipy.optimize import least_squares
+from scipy.spatial.transform import Rotation
 
 import numpy.linalg
 
@@ -215,10 +216,9 @@ def reject_outliers(kp1, kp2, dmatches, N=15000, threshold=.005):
             best_F = F
 
     print(f"RANSAC: Found {len(best_inliers)} inliers out of {len(pts1)} matches.")
-    
+
     recomputed_F = estimate_fundamental_matrix(pts1[best_inliers], pts2[best_inliers])
     return recomputed_F, best_inliers
-
 
 
 def get_essential_mtx(K, F):
@@ -229,6 +229,7 @@ def get_essential_mtx(K, F):
     E = K.T @ F @ K
     return E
 
+
 def get_camera_pose(E):
     U, D, Vt = np.linalg.svd(E)
     print("D", D)
@@ -238,8 +239,8 @@ def get_camera_pose(E):
         [0, 0, 1]
     ])
     # Computing all possible pairs
-    C1 = U[:,2]
-    C2 = -U[:,2]
+    C1 = U[:, 2]
+    C2 = -U[:, 2]
 
     R1 = U @ W @ Vt
     R2 = U @ W.T @ Vt
@@ -251,6 +252,7 @@ def get_camera_pose(E):
             R = -R
         correct_pose.append((C, R))
     return correct_pose
+
 
 # def linear_triangulation(K, R, T, pose, final_pts1, final_pts2):
 #     I = np.identity(3)
@@ -304,15 +306,19 @@ def get_skew_mat(a):
         [-a[1], a[0], 0]
     ])
 
+
 def linear_triangulation(K, R, T, pose, final_pts1, final_pts2):
     I = np.identity(3)
     P1 = np.dot(K, np.dot(R, np.hstack((I, -T))))
-    X_all = []  # List to store points for all four solutions
-    
+    X_all = [] # List to store points for all four solutions
+    X_map = {}
+
     best_pose = 0
 
     for (C, R2) in pose:
         X_current = []  # Points for current solution
+        valid_point = []
+        vp = {}
         positive_Z = 0
         C = C.reshape(3, 1)
         P2 = np.dot(K, np.dot(R2, np.hstack((I, -C))))
@@ -320,7 +326,7 @@ def linear_triangulation(K, R, T, pose, final_pts1, final_pts2):
         for i, (p1, p2) in enumerate(zip(final_pts1, final_pts2)):
             x1, y1 = p1
             x2, y2 = p2
-            
+
             p1 = np.array([x1, y1, 1])
             p2 = np.array([x2, y2, 1])
 
@@ -337,16 +343,23 @@ def linear_triangulation(K, R, T, pose, final_pts1, final_pts2):
 
             # Store point for current solution
             X_current.append(X_3d)
+            v = X_3d - C.flatten()
 
             # Check cheirality condition
-            r3 = R2[:, 2]
-            if np.dot(r3, (X_3d - C.flatten())) > 0 and X_3d[2] > 0:
+            r3 = R2[2, :]
+            print("r3_shape", r3.shape)
+            print("v", v.shape)
+            print("dot product", np.dot(r3, v) )
+            if np.dot(r3, v) > 0 and X_3d[2] > 0:
                 positive_Z += 1
+                #valid_point.append(X_3d)
+                #vp['j'] = X_3d
 
         # Add all points for current solution to X_all
         X_all.append(X_current)
         if positive_Z > best_pose:
             best_pose = positive_Z
+            #X_best = valid_point
             X_best = X_current
             best_R = R2
             best_T = C
@@ -354,13 +367,13 @@ def linear_triangulation(K, R, T, pose, final_pts1, final_pts2):
     # Convert lists to numpy arrays
     X_best = np.array(X_best)
     X_all = np.array(X_all)
+    print("X_best", valid_point)
+    print("mapping", vp)
 
     return X_best, best_R, best_T, X_all
 
 
-
 def optimization(K, R1, T1, R2, T2, pts1, pts2, X_i):
-
     def objective(X):
         return residuals(X, K, R1, T1, R2, T2, pts1, pts2)
 
@@ -373,6 +386,7 @@ def optimization(K, R1, T1, R2, T2, pts1, pts2, X_i):
     )
 
     return result.x
+
 
 def residuals(X_1, K, R, T, R2, T2, pts1, pts2):
     I = np.identity(3)
@@ -394,24 +408,24 @@ def residuals(X_1, K, R, T, R2, T2, pts1, pts2):
     # Convert X to homogeneous coordinates if not already
     X_1 = np.append(X_1, 1) if X_1.shape[0] == 3 else X_1
 
-    a = (np.dot(P1_1, X_1)/np.dot(P1_3, X_1))
-    b = (np.dot(P1_2, X_1)/np.dot(P1_3, X_1))
-    c = (np.dot(P2_1, X_1)/np.dot(P2_3, X_1))
-    d = (np.dot(P2_2, X_1)/np.dot(P2_3, X_1))
+    a = (np.dot(P1_1, X_1) / np.dot(P1_3, X_1))
+    b = (np.dot(P1_2, X_1) / np.dot(P1_3, X_1))
+    c = (np.dot(P2_1, X_1) / np.dot(P2_3, X_1))
+    d = (np.dot(P2_2, X_1) / np.dot(P2_3, X_1))
 
-    geo_error_1 = (a - x1)**2 + (b - y1)**2
-    geo_error_2 = (c - x2)**2 + (d - y2)**2
+    geo_error_1 = (a - x1) ** 2 + (b - y1) ** 2
+    geo_error_2 = (c - x2) ** 2 + (d - y2) ** 2
     error = geo_error_1 + geo_error_2
 
     return error
+
 
 def non_linear_triangulation(K, R1, T1, R2, T2, finalpts1, finalpts2, X):
     X_optimized = []
     initial_errors = []
     final_errors = []
-    for pts1, pts2 , X_i in zip(finalpts1, finalpts2, X):
-
-        #intial error
+    for pts1, pts2, X_i in zip(finalpts1, finalpts2, X):
+        # intial error
         initial_residuals = residuals(X_i[:3], K, R1, T1, R2, T2, pts1, pts2)
         initial_error = np.sum(initial_residuals ** 2)
         initial_errors.append(initial_error)
@@ -419,25 +433,17 @@ def non_linear_triangulation(K, R1, T1, R2, T2, finalpts1, finalpts2, X):
         X_opt = optimization(K, R1, T1, R2, T2, pts1, pts2, X_i)
         X_optimized.append(X_opt)
 
-        #final error
+        # final error
         final_residuals = residuals(X_opt, K, R1, T1, R2, T2, pts1, pts2)
         final_error = np.sum(final_residuals ** 2)
         final_errors.append(final_error)
 
-    # error before optimization
-    # initial_error = 0
-    # final_error = 0
-    # for pts1, pts2, X_1, X_2 in zip(finalpts1, finalpts2, X, X_optimized):
-    #     initial_error += np.sum(residuals(X_1, K, R1, T1, R2, T2, pts1, pts2))
-    #     final_error += np.sum(residuals(X_2, K, R1, T1, R2, T2, pts1, pts2))
-    #
-    # print(f"Initial total error: {initial_error}")
-    # print(f"Final total error: {final_error}")
-        # Print error statistics
+
     print(f"Mean initial error: {np.mean(initial_errors):.6f}")
     print(f"Mean final error: {np.mean(final_errors):.6f}")
     print(f"Error reduction: {100 * (1 - np.mean(final_errors) / np.mean(initial_errors)):.2f}%")
     return np.array(X_optimized)
+
 
 # def non_linear_triangulation(K, R, T, R2, T2, final_pts1, final_pts2, X):
 #     I = np.identity(3)
@@ -475,126 +481,268 @@ def non_linear_triangulation(K, R1, T1, R2, T2, finalpts1, finalpts2, X):
 #         error.append(point_error)
 #
 #     return
+def LinearPnP(X3d,x2d,K):
+    N = X3d.shape[0]
+    A = np.zeros((2*N, 12))
+    K_inv = np.linalg.inv(K)
+    for i in range(N):
+        X, Y, Z = X3d[i]
+        x, y = x2d[i]
+        #u, v = x2d[i]
 
-def plot_dual_view_triangulation(all_world_points, pose=None):
+        # # Normalized image coordinates
+        # x_normalized = np.dot(K_inv, np.array([u, v, 1]))
+        # x, y = x_normalized[0], x_normalized[1]
+
+        # fill A matrix
+        A[i] = [X, Y, Z, 1, 0,0, 0, 0 , -x*X, -x*Y, -x*Z, -x]
+        A[i+1] = [0, 0, 0, 0, X, Y, Z, 1, -y*X, -y*Y, -y*Z, -y]
+    # Solve for P using SVD
+    _, _, Vt = np.linalg.svd(A)
+    P = Vt[-1].reshape(3, 4)
+
+    P_ = P[:, :3]
+    K_inv = np.linalg.inv(K)
+    L = np.dot(K_inv, P_) # This is K⁻¹[P₁ P₂ P₃]
+
+    # SVD cleanup
+    U, D, Vt = np.linalg.svd(L)
+    R = np.dot(U, Vt)  # enforce orthonormality
+
+    if np.linalg.det(R) < 0:
+        R = -R
+
+    # Get translation: T = K⁻¹P₄
+    T = np.dot(K_inv, P[:, 3:4])
+
+    C = P[:, 3]
+    C = - np.linalg.inv(R).dot(C)
+
+    # Scale recovery
+    gamma = D[0]
+    T = T / gamma
+
+    return R, T, C
+
+
+def RansacPnP(X3d, x2d, K, num_iterations=1000, threshold=2.0):
+    N = X3d.shape[0]
+    print("N",N)
+    best_inliers = []
+    best_R = None
+    best_T = None
+
+    for i in range(num_iterations):
+        #Randomly select 6 correspondences
+        sample_indices = np.random.choice(N, 6, replace=False)
+        X_sample = X3d[sample_indices]
+        x_sample = x2d[sample_indices]
+
+        try:
+            #Compute camera pose from sample
+            R, T, C = LinearPnP(X_sample, x_sample, K)
+
+            #Measure reprojection error for all points
+            inliers = []
+            for j in range(N):
+                # Project 3D point to image
+                X = np.append(X3d[j], 1)  # Homogeneous coordinates
+                P = np.dot(K, np.hstack((R, T)))  # Projection matrix
+                x_proj = np.dot(P, X)
+                x_proj = x_proj / x_proj[2]  # Normalize homogeneous coordinates
+
+                # Calculate reprojection error
+                error = np.sqrt((x_proj[0] - x2d[j][0]) ** 2 + (x_proj[1] - x2d[j][1]) ** 2)
+
+                # 4. Identify inliers
+                if error < threshold:
+                    inliers.append(j)
+
+            # Update best model if we found more inliers
+            if len(inliers) > len(best_inliers):
+                best_inliers = inliers
+                best_R = R
+                best_T = T
+        except:
+            print("Error")
+            # Skip iterations that might fail due to degenerate configurations
+            continue
+
+    # Refine using all inliers (optional)
+    if len(best_inliers) >= 6:
+        try:
+            R_refined, T_refined = LinearPnP(X3d[best_inliers], x2d[best_inliers], K)
+            return R_refined, T_refined, best_inliers
+        except:
+            pass
+
+    return best_R, best_T, best_inliers
+
+
+
+
+def NonlinearPnP(Xnp, xn2, K, R_init, C_init):
+    """
+    Non-linear refinement of PnP using quaternions for rotation representation
+
+    Parameters:
+    X3d: Nx3 array of 3D world points
+    x2d: Nx2 array of corresponding 2D image points
+    K: 3x3 camera intrinsic matrix
+    R_init: Initial rotation matrix from LinearPnP
+    C_init: Initial camera center from LinearPnP
+
+    Returns:
+    R: Refined rotation matrix
+    C: Refined camera center
+    """
+
+
+    # Convert rotation matrix to quaternion for optimization
+    r = Rotation.from_matrix(R_init)
+    quat_init = r.as_quat()  # [x, y, z, w] format
+    params_init = np.concatenate([quat_init, C_init.flatten()])
+
+
+    def residuals(params):
+        # Extract quaternion and camera center from parameters
+        quat = params[:4]
+        C = params[4:].reshape(3, 1)
+
+        # Normalize quaternion
+        quat = quat / np.linalg.norm(quat)
+
+        # Convert quaternion to rotation matrix
+        r = Rotation.from_quat(quat)
+        R = r.as_matrix()
+
+        # Calculate T from R and C: T = -RC
+        T = -R @ C
+
+        # Compute projection matrix
+        P = K @ np.hstack((R, T))
+
+        # Calculate reprojection errors
+        errors = []
+        for i in range(len(Xnp)):
+            # Project 3D point
+            X = np.append(Xnp[i], 1)
+            x_proj = P @ X
+            x_proj = x_proj / x_proj[2]
+
+            # Compute error
+            error_x = xn2[i][0] - x_proj[0]
+            error_y = xn2[i][1] - x_proj[1]
+            errors.extend([error_x, error_y])
+
+        return errors
+
+    # optimization
+    result = least_squares(residuals, params_init, method='lm')
+    optimized_params = result.x
+
+    # optimized quaternion and camera center
+    quat_opt = optimized_params[:4]
+    quat_opt = quat_opt / np.linalg.norm(quat_opt)
+    C_opt = optimized_params[4:].reshape(3, 1)
+
+    # Convert quaternion back to rotation matrix
+    r_opt = Rotation.from_quat(quat_opt)
+    R_opt = r_opt.as_matrix()
+
+    return R_opt, C_opt
+
+def plot_dual_view_triangulation(points_data, x_min=None, x_max=None, z_min=None, z_max=None):
     """
     Create side-by-side plots showing X vs Y (front view) and X vs Z (top view)
-    of world points from all four possible triangulation solutions.
-    
-    R_list, T_list are iterables (lists) of rotation matrices and translation
-    vectors for multiple camera poses.
+    of world points.
+
+    Parameters:
+    points_data: Either a single array of 3D points or a list of arrays of 3D points
+    x_min, x_max: Optional limits for X axis
+    z_min, z_max: Optional limits for Z axis
     """
     import matplotlib.pyplot as plt
     import numpy as np
 
-    # -- 1. Prepare figure with two subplots side by side --
+    # Create figure with two subplots side by side
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
 
-    # Colors for different solutions (assuming all_world_points is a list of sets of 3D points)
+    # Ensure points_data is a list
+    if not isinstance(points_data, list):
+        points_data = [points_data]
+
+    # Colors for different solutions
     colors = ['blue', 'red', 'green', 'cyan']
-    
-    # -- 2. Plot the triangulated points in both views --
-    for i, points in enumerate(all_world_points):
+
+    # Plot points in both views
+    for i, points in enumerate(points_data):
         points = np.array(points)
 
-        # Front view (X vs Y)
-        ax1.scatter(points[:, 0], points[:, 1],
-                    c=colors[i % len(colors)], s=1, alpha=0.5,
-                    label=f'Solution {i + 1}')
+        # Check if points is empty
+        if points.size == 0:
+            continue
 
-        # Top view (X vs Z)
-        ax2.scatter(points[:, 0], points[:, 2],
-                    c=colors[i % len(colors)], s=1, alpha=0.5)
+        # Handle different array shapes
+        if len(points.shape) == 1:
+            # Try to reshape if it's a 1D array
+            if points.size % 3 == 0:
+                points = points.reshape(-1, 3)
+            else:
+                print(f"Warning: Cannot reshape points with shape {points.shape} into Nx3 array")
+                continue
 
-    
-    # -- 3. Loop through each camera pose and plot it --
-    if pose is not None:
-        R_list = [R for C, R in pose]
-        T_list = [C for C, R in pose]
-        
-        
-        #    Prepare a colormap for multiple camera poses --
-        #    This creates N distinct colors if we have N cameras.
-        num_cameras = len(R_list)
-        camera_colors = plt.cm.rainbow(np.linspace(0, 1, num_cameras))
-        
-        for i, (R, T) in enumerate(zip(R_list, T_list)):
-            # Camera center in world coordinates: C = -R^T * T
-            print(R.shape, T.shape)
-            camera_center = -R.T @ T.reshape(-1)
-
-            # Plot camera center in both views
-            ax1.scatter(camera_center[0], camera_center[1],
-                        marker='s', c=[camera_colors[i]], s=80,
-                        label=f'Camera {i+1}')
-            ax2.scatter(camera_center[0], camera_center[2],
-                        marker='s', c=[camera_colors[i]], s=80)
-
-            # Draw a small axis or "look" direction to indicate camera orientation.
-            # Typically the camera looks along the local Z-axis, i.e. R[:, 2] in world.
-            scale = 0.1  # Adjust for visibility
-            camera_look_dir = R[:, 2]
-            look_endpoint = camera_center + scale * camera_look_dir
-
+        # Now we should have a proper Nx3 array
+        try:
             # Front view (X vs Y)
-            ax1.plot(
-                [camera_center[0], look_endpoint[0]],
-                [camera_center[1], look_endpoint[1]],
-                color=camera_colors[i],
-                linewidth=2
-            )
+            ax1.scatter(points[:, 0], points[:, 1],  # X vs Y coordinates
+                        c=colors[i % len(colors)], s=1, alpha=0.5,
+                        label=f'Solution {i + 1}')
 
             # Top view (X vs Z)
-            ax2.plot(
-                [camera_center[0], look_endpoint[0]],
-                [camera_center[2], look_endpoint[2]],
-                color=camera_colors[i],
-                linewidth=2
-            )
+            ax2.scatter(points[:, 0], points[:, 2],  # X vs Z coordinates
+                        c=colors[i % len(colors)], s=1, alpha=0.5)
+        except IndexError as e:
+            print(f"Error plotting points with shape {points.shape}: {e}")
+            print("First few elements:", points[:min(5, len(points))])
+            continue
 
-    # -- 5. Set labels, titles, grid, aspect ratio --
+    # Set labels and titles
     ax1.set_xlabel('X')
     ax1.set_ylabel('Y')
     ax1.set_title('Front View (X vs Y)')
-    ax1.grid(True, linestyle='--', alpha=0.3)
-    ax1.axis('equal')
 
     ax2.set_xlabel('X')
     ax2.set_ylabel('Z')
     ax2.set_title('Top View (X vs Z)')
+
+    # Add grid to both plots
+    ax1.grid(True, linestyle='--', alpha=0.3)
     ax2.grid(True, linestyle='--', alpha=0.3)
+
+    # Set equal aspect ratio for both plots
+    ax1.axis('equal')
     ax2.axis('equal')
 
-    # -- 6. Combine and reduce duplicate legend entries on ax1 --
-    handles, labels = ax1.get_legend_handles_labels()
-    # Using dict trick to remove duplicates while preserving order
-    unique = dict(zip(labels, handles))
-    ax1.legend(unique.values(), unique.keys(), bbox_to_anchor=(1.05, 1), loc='upper left')
+    # Add legend to the first plot only
+    ax1.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
 
-    # -- 7. Adjust layout to prevent overlap --
+    # Set specific X and Z axis limits if provided
+    if x_min is not None and x_max is not None:
+        ax1.set_xlim(x_min, x_max)
+        ax2.set_xlim(x_min, x_max)
+
+    if z_min is not None and z_max is not None:
+        ax2.set_ylim(z_min, z_max)  # Z axis is the Y-axis in the second plot
+
+    # Adjust layout to prevent overlap
     plt.tight_layout()
-
-    # -- 8. Optionally set some padding around data in both axes --
-    for ax in [ax1, ax2]:
-        xlim = ax.get_xlim()
-        ylim = ax.get_ylim()
-        x_range = xlim[1] - xlim[0]
-        y_range = ylim[1] - ylim[0]
-        x_padding = x_range * 0.1
-        y_padding = y_range * 0.1
-        ax.set_xlim(xlim[0] - x_padding, xlim[1] + x_padding)
-        ax.set_ylim(ylim[0] - y_padding, ylim[1] + y_padding)
-
-    # -- 9. Show the final figure --
     plt.show()
-
-
-
 
 def main():
     # Set data folder and number of images
-    # path = "D:/Computer vision/Homeworks/5. Project 2 - Phase1/YourDirectoryID_p2 (1)/YourDirectoryID_p2/Phase1/P2Data/P2Data"
-    path = "Data"
+    path = "D:/Computer vision/Homeworks/5. Project 2 - Phase1/YourDirectoryID_p2 (1)/YourDirectoryID_p2/Phase1/P2Data/P2Data"
+    #path = ""
     num_imgs = 5
 
     # Load images (which are already undistorted and resized to 800x600px)
@@ -602,9 +750,10 @@ def main():
     if len(images) < 2:
         print("Need at least two images to match.")
         return
+    path2 = "D:/Computer vision/Homeworks/5. Project 2 - Phase1/YourDirectoryID_p2 (1)/YourDirectoryID_p2/Phase1/P2Data/P2Data"
 
     # Load camera calibration parameters (intrinsic matrix K) if needed
-    calib_file = os.path.join(path, "calibration.txt")
+    calib_file = os.path.join(path2, "calibration.txt")
     try:
         K = load_calibration(calib_file)
         print("Camera intrinsic matrix K:")
@@ -614,7 +763,8 @@ def main():
         return
 
     # Load matching data for image1 from matching1.txt
-    matching_file = os.path.join(path, "matching1.txt")
+    matching_file = os.path.join(path2, "matching1.txt")
+
     try:
         _, matches = parse_matching_file(matching_file)
     except Exception as e:
@@ -638,7 +788,7 @@ def main():
     # Display the inlier matches using cv2.drawMatches
     inlier_matches = [dmatches[i] for i in inliers]
     display_matches(images[0], images[target_img_id - 1], kp1, kp2, inlier_matches)
-    
+
     fpts1 = np.array([kp1[m.queryIdx].pt for m in inlier_matches])
     fpts2 = np.array([kp2[m.trainIdx].pt for m in inlier_matches])
 
@@ -649,27 +799,98 @@ def main():
     pose = get_camera_pose(E)
     print(f"Camera pose {pose}")
 
-    #Linear triangulation
+    # Linear triangulation
     # Rotation and translation of base frame
     R = np.identity(3)
-    T = np.zeros((3,1))
+    T = np.zeros((3, 1))
 
     X_final, R_final, T_final, all_world_points = linear_triangulation(K, R, T, pose, fpts1, fpts2)
     print("best_R", R_final)
     print("best_T", T_final)
     print(all_world_points.shape)
-    plot_dual_view_triangulation(all_world_points)
-    X = all_world_points[3]
+
     # print("X:", X)
-    print("length of X:", len(X))
+    #print("length of X:", len(X))
+
+    # Nonlinear triangulation
     X_optimized = non_linear_triangulation(K, R, T, R_final, T_final, fpts1, fpts2, X_final)
     X_optimized = np.array(X_optimized)
-    
-    plot_dual_view_triangulation(np.array([X_optimized, X_final]))
-    
+    print("X_final shape:", X_final.shape)  # Check the shape
 
+    # Try reshaping if needed
+    if len(X_final.shape) == 1 and X_final.size % 3 == 0:
+        X_final_reshaped = X_final.reshape(-1, 3)
+        plot_dual_view_triangulation([X_final_reshaped], x_min=-200, x_max=200, z_min=-1000, z_max=1000)
+    else:
+        # If it's already a 2D array with the right shape
+        plot_dual_view_triangulation([X_final], x_min=-200, x_max=200, z_min=-1000, z_max=1000)
+
+
+    # matching 3rd image
+    matching_fil = os.path.join(path2, "matching1.txt")
+
+    try:
+        _, matches = parse_matching_file(matching_fil)
+    except Exception as e:
+        print(f"Error parsing matching file: {e}")
+        return
+    target_img_id = 3
+    kp1, kp3, dmatches3 = get_keypoints_and_matches_for_pair(matches, target_img_id)
+    print(f"Found {len(kp1)} matches between image 1 and image {target_img_id}")
+
+    # Display the matches using cv2.drawMatches
+    display_matches(images[0], images[target_img_id - 1], kp1, kp3, dmatches3)
+
+    # Estimate the fundamental matrix
+    F3, inliers3 = reject_outliers(kp1, kp3, dmatches3)
+
+    print("Estimated fundamental matrix F3:")
+    print(F3)
+
+    # Display the inlier matches using cv2.drawMatches
+    inlier_matches3 = [dmatches3[i] for i in inliers3]
+    display_matches(images[0], images[target_img_id - 1], kp1, kp3, inlier_matches3)
+
+    pts1_img3 = np.array([kp1[m.queryIdx].pt for m in inlier_matches3])
+    pts3 = np.array([kp3[m.trainIdx].pt for m in inlier_matches3])
+
+    X_3d = []
+    x_2d = []
+    threshold = 2.0
+
+    for i, (pt3d, pt1) in enumerate(zip(X_optimized, fpts1)):
+        # Find this point in the matching file's image 1 points
+        for j, match_pt1 in enumerate(pts1_img3):
+            # If we find a very close or exact match
+            if np.allclose(pt1, match_pt1, atol=threshold):
+                # Add the correspondence:
+                # - 3D point from triangulation
+                # - 2D point in the target image
+                X_3d.append(pt3d)
+                x_2d.append(pts3[j])
+                break
+
+    # Convert to numpy arrays
+    X_3d = np.array(X_3d)
+    x_2d = np.array(x_2d)
+    print(f"Found {len(X_3d)} correspondences for PnP")
+
+    # Check if we have enough correspondences
+    if len(X_3d) < 6:
+        print("Warning: Not enough correspondences for reliable PnP")
+        # Don't return here unless this is in a function
+        # return None, None, None, None
+
+    camera_pose_3 = LinearPnP(X_3d, x_2d, K)
+    print("camerapose3", camera_pose_3)
+
+    camera_pose_3_postransac = RansacPnP(X_3d, x_2d, K, num_iterations=1000, threshold=2.0)
+    R_init, C_init, POL = camera_pose_3_postransac
+    print("camerapose3_ransac", camera_pose_3_postransac)
+
+    camera_pose_3_postnonlinear = NonlinearPnP(X_3d, x_2d, K, R_init, C_init)
+    print("camerapose3_ransac_non_linear", camera_pose_3_postransac)
 
 
 if __name__ == '__main__':
     main()
-# Create Your Own Starter Code :)
