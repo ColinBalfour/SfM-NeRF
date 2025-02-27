@@ -483,78 +483,176 @@ def non_linear_triangulation(K, R1, T1, R2, T2, finalpts1, finalpts2, X):
 #     return
 def LinearPnP(X3d,x2d,K):
     N = X3d.shape[0]
-    A = np.zeros((2*N, 12))
+    #A = np.zeros((2*N, 12))
+    A = None
     K_inv = np.linalg.inv(K)
+    #Normalization first
+    x_normalized = np.zeros((N, 2))
+
+    for i in range(N):
+        p = np.dot(K_inv, np.array([x2d[i][0], x2d[i][1], 1.0]))
+        x_normalized[i] = p[:2]
+
+
     for i in range(N):
         X, Y, Z = X3d[i]
-        x, y = x2d[i]
-        #u, v = x2d[i]
+        #x, y = x2d[i]
+        x, y = x_normalized[i]
 
-        # # Normalized image coordinates
-        # x_normalized = np.dot(K_inv, np.array([u, v, 1]))
-        # x, y = x_normalized[0], x_normalized[1]
 
         # fill A matrix
-        A[i] = [X, Y, Z, 1, 0,0, 0, 0 , -x*X, -x*Y, -x*Z, -x]
-        A[i+1] = [0, 0, 0, 0, X, Y, Z, 1, -y*X, -y*Y, -y*Z, -y]
+        A_1 = [X, Y, Z, 1, 0,0, 0, 0 , -x*X, -x*Y, -x*Z, -x]
+        A_2 = [0, 0, 0, 0, X, Y, Z, 1, -y*X, -y*Y, -y*Z, -y]
+
+        A_rows = np.array([A_1, A_2])
+
+        # Stack onto the existing A matrix
+        if A is None:
+            A = A_rows
+        else:
+            A = np.vstack((A, A_rows))
+
     # Solve for P using SVD
     _, _, Vt = np.linalg.svd(A)
     P = Vt[-1].reshape(3, 4)
+    R_est = P[:, :3]
 
-    P_ = P[:, :3]
-    K_inv = np.linalg.inv(K)
-    L = np.dot(K_inv, P_) # This is K⁻¹[P₁ P₂ P₃]
+    #P_123 = P[:, :3]
+
+    # Apply K⁻¹ to get R̂ = K⁻¹[p₁ p₂ p₃]
+    #K_inv = np.linalg.inv(K)
+    #R_est = np.dot(K_inv, P_123) # This is K⁻¹[P₁ P₂ P₃]
 
     # SVD cleanup
-    U, D, Vt = np.linalg.svd(L)
+    U, D, Vt = np.linalg.svd(R_est)
     R = np.dot(U, Vt)  # enforce orthonormality
 
     if np.linalg.det(R) < 0:
         R = -R
 
-    # Get translation: T = K⁻¹P₄
-    T = np.dot(K_inv, P[:, 3:4])
+    # # Translation
+    p4 = P[:, 3]
 
-    C = P[:, 3]
-    C = - np.linalg.inv(R).dot(C)
+    #t = np.dot(K_inv, p4)
+    t = p4
 
-    # Scale recovery
-    gamma = D[0]
-    T = T / gamma
+    T = p4/D[0] # translation after scale recovery
 
-    return R, T, C
+    # Camera Centre
+    C = -np.dot(R.T, T) # t should be after scale
+
+    return C, R
 
 
-def RansacPnP(X3d, x2d, K, num_iterations=1000, threshold=2.0):
+# def LinearPnP_CrossProduct(X3d, x2d, K):
+#     N = X3d.shape[0]
+#
+#     # Normalize image points with K
+#     K_inv = np.linalg.inv(K)
+#     x_normalized = np.zeros((N, 3))
+#
+#     for i in range(N):
+#         x_normalized[i] = K_inv @ np.array([x2d[i][0], x2d[i][1], 1])
+#
+#     # Build matrix A using cross product formulation
+#     A = np.zeros((3 * N, 12))
+#
+#     for i in range(N):
+#         X, Y, Z = X3d[i]
+#         u, v, w = x_normalized[i]  # w should be ~1 after normalization
+#
+#         # Create skew-symmetric matrix for cross product
+#         skew_x = np.array([
+#             [0, -w, v],
+#             [w, 0, -u],
+#             [-v, u, 0]
+#         ])
+#
+#         # Create X_tilde (expanded X for all rows of P)
+#         X_homo = np.array([X, Y, Z, 1])
+#         X_tilde = np.zeros((3, 12))
+#
+#         # Fill X_tilde with the 3D point in the right positions
+#         X_tilde[0, 0:4] = X_homo
+#         X_tilde[1, 4:8] = X_homo
+#         X_tilde[2, 8:12] = X_homo
+#
+#         # Compute skew_x × X_tilde and store in A
+#         A[3 * i:3 * (i + 1), :] = skew_x @ X_tilde
+#
+#     # Solve using SVD
+#     _, _, Vt = np.linalg.svd(A)
+#     P = Vt[-1].reshape(3, 4)
+#
+#     # Extract rotation and translation
+#     R_est = P[:, :3]
+#     t = P[:, 3]
+#
+#     # Use SVD to enforce orthogonality of R
+#     U, D, Vt = np.linalg.svd(R_est)
+#     R = U @ Vt
+#
+#     # Check determinant and adjust if needed
+#     if np.linalg.det(R) < 0:
+#         R = -R
+#         t = -t
+#
+#     # Calculate camera center
+#     C = -R.T @ t
+#
+#     # Scale recovery
+#     # Note: The scale factor should be the first singular value
+#     scale = D[0]
+#     t_scale = t / scale
+#
+#     return R, t, C, t_scale
+
+def reprojection_error(X, x, R, C, K ):
+    I = np.identity(3)
+    P = np.dot(K, np.dot(R, np.hstack((I, -C))))
+    # rows of projection matrices P2
+    P1 = P[0, :].reshape(1, 4)
+    P2 = P[1, :].reshape(1, 4)
+    P3 = P[2, :].reshape(1, 4)
+
+    u, v = x
+
+    # Convert X to homogeneous coordinates
+    X = np.append(X, 1) if X.shape[0] == 3 else X
+
+    a = (np.dot(P1, X) / np.dot(P3, X))
+    b = (np.dot(P2, X) / np.dot(P3, X))
+    error_x = u - a
+    error_y = v - b
+
+    error = (u - a) ** 2 + (v - b) ** 2
+
+    return error, error_x, error_y
+
+def PnPRANSAC(X3d, x2d, K, num_iter=1000, threshold=2.0):
     N = X3d.shape[0]
+    I = np.identity(3)
     print("N",N)
     best_inliers = []
     best_R = None
     best_T = None
 
-    for i in range(num_iterations):
+    for i in range(num_iter):
         #Randomly select 6 correspondences
-        sample_indices = np.random.choice(N, 6, replace=False)
-        X_sample = X3d[sample_indices]
-        x_sample = x2d[sample_indices]
+        indices = np.random.choice(N, 6, replace=False)
+        X_sample = X3d[indices]
+        x_sample = x2d[indices]
 
         try:
             #Compute camera pose from sample
-            R, T, C = LinearPnP(X_sample, x_sample, K)
-
-            #Measure reprojection error for all points
+            C, R = LinearPnP(X_sample, x_sample, K)
+            C = C.reshape(3,1)
+            #reprojection errors for all points
             inliers = []
             for j in range(N):
                 # Project 3D point to image
-                X = np.append(X3d[j], 1)  # Homogeneous coordinates
-                P = np.dot(K, np.hstack((R, T)))  # Projection matrix
-                x_proj = np.dot(P, X)
-                x_proj = x_proj / x_proj[2]  # Normalize homogeneous coordinates
-
-                # Calculate reprojection error
-                error = np.sqrt((x_proj[0] - x2d[j][0]) ** 2 + (x_proj[1] - x2d[j][1]) ** 2)
-
-                # 4. Identify inliers
+               # X = np.append(X3d[j], 1)  # Homogeneous coordinates
+                error, _, _ = reprojection_error(X3d[j], x2d[j], R, C, K)
                 if error < threshold:
                     inliers.append(j)
 
@@ -562,48 +660,20 @@ def RansacPnP(X3d, x2d, K, num_iterations=1000, threshold=2.0):
             if len(inliers) > len(best_inliers):
                 best_inliers = inliers
                 best_R = R
-                best_T = T
+                best_T = C
         except:
             print("Error")
-            # Skip iterations that might fail due to degenerate configurations
             continue
 
-    # Refine using all inliers (optional)
-    if len(best_inliers) >= 6:
-        try:
-            R_refined, T_refined = LinearPnP(X3d[best_inliers], x2d[best_inliers], K)
-            return R_refined, T_refined, best_inliers
-        except:
-            pass
 
     return best_R, best_T, best_inliers
 
-
-
-
-def NonlinearPnP(Xnp, xn2, K, R_init, C_init):
-    """
-    Non-linear refinement of PnP using quaternions for rotation representation
-
-    Parameters:
-    X3d: Nx3 array of 3D world points
-    x2d: Nx2 array of corresponding 2D image points
-    K: 3x3 camera intrinsic matrix
-    R_init: Initial rotation matrix from LinearPnP
-    C_init: Initial camera center from LinearPnP
-
-    Returns:
-    R: Refined rotation matrix
-    C: Refined camera center
-    """
-
-
+def NonlinearPnP(X3d, x2d, K, R_init, C_init):
     # Convert rotation matrix to quaternion for optimization
     r = Rotation.from_matrix(R_init)
     quat_init = r.as_quat()  # [x, y, z, w] format
     params_init = np.concatenate([quat_init, C_init.flatten()])
-
-
+    I = np.identity(3)
     def residuals(params):
         # Extract quaternion and camera center from parameters
         quat = params[:4]
@@ -616,24 +686,15 @@ def NonlinearPnP(Xnp, xn2, K, R_init, C_init):
         r = Rotation.from_quat(quat)
         R = r.as_matrix()
 
-        # Calculate T from R and C: T = -RC
-        T = -R @ C
-
-        # Compute projection matrix
-        P = K @ np.hstack((R, T))
-
         # Calculate reprojection errors
         errors = []
-        for i in range(len(Xnp)):
+        geoerrors = []
+        for i in range(len(X3d)):
             # Project 3D point
-            X = np.append(Xnp[i], 1)
-            x_proj = P @ X
-            x_proj = x_proj / x_proj[2]
-
-            # Compute error
-            error_x = xn2[i][0] - x_proj[0]
-            error_y = xn2[i][1] - x_proj[1]
-            errors.extend([error_x, error_y])
+            geo_error, error_x, error_y = reprojection_error(X3d[i], x2d[i], R, C, K)
+            errors.extend(error_x)
+            errors.extend(error_y)
+            geoerrors.extend([geo_error])
 
         return errors
 
@@ -650,7 +711,13 @@ def NonlinearPnP(Xnp, xn2, K, R_init, C_init):
     r_opt = Rotation.from_quat(quat_opt)
     R_opt = r_opt.as_matrix()
 
-    return R_opt, C_opt
+    # Calculate final mean reprojection error
+    final_errors = residuals(optimized_params)
+    rms_error = np.sqrt(np.mean(np.square(final_errors)))
+    print(f"Non-linear refinement: RMS reprojection error = {rms_error:.4f} pixels")
+
+    return  C_opt, R_opt
+
 
 def plot_dual_view_triangulation(points_data, x_min=None, x_max=None, z_min=None, z_max=None):
     """
@@ -870,27 +937,31 @@ def main():
                 x_2d.append(pts3[j])
                 break
 
-    # Convert to numpy arrays
     X_3d = np.array(X_3d)
     x_2d = np.array(x_2d)
     print(f"Found {len(X_3d)} correspondences for PnP")
-
+    
     # Check if we have enough correspondences
     if len(X_3d) < 6:
         print("Warning: Not enough correspondences for reliable PnP")
         # Don't return here unless this is in a function
         # return None, None, None, None
 
+    #Linear PnP
     camera_pose_3 = LinearPnP(X_3d, x_2d, K)
-    print("camerapose3", camera_pose_3)
+    C_3, R_3 = camera_pose_3
+    print(f"Rotation: {R_3}, Centre: {C_3}")
 
-    camera_pose_3_postransac = RansacPnP(X_3d, x_2d, K, num_iterations=1000, threshold=2.0)
-    R_init, C_init, POL = camera_pose_3_postransac
-    print("camerapose3_ransac", camera_pose_3_postransac)
+    #PnP RanSac
+    R_opt_3, C_opt_3, inliers_3= PnPRANSAC(X_3d, x_2d, K)
+    print(f" Rotation after pnp ransac for view3: {R_opt_3}, Centre for view3: {C_opt_3}")
 
-    camera_pose_3_postnonlinear = NonlinearPnP(X_3d, x_2d, K, R_init, C_init)
-    print("camerapose3_ransac_non_linear", camera_pose_3_postransac)
+    # Nonlinear PnP
+    final_Copt_3, final_Ropt_3 = NonlinearPnP(X_3d, x_2d, K, R_opt_3, C_opt_3)
+    print(f"Rotation and centre for camera 3 after Non linear PnP:{final_Ropt_3}, {final_Copt_3}")
 
+ 
 
 if __name__ == '__main__':
     main()
+# Create Your Own Starter Code :)
