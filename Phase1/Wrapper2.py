@@ -172,7 +172,7 @@ def estimate_fundamental_matrix(pts1, pts2):
     return F
 
 
-def reject_outliers(kp1, kp2, dmatches, N=15000, threshold=.005):
+def reject_outliers(kp1, kp2, dmatches, N=15000, threshold=.01):
     """
     Reject outliers using RANSAC.
     """
@@ -181,14 +181,16 @@ def reject_outliers(kp1, kp2, dmatches, N=15000, threshold=.005):
     pts2 = np.array([kp2[m.trainIdx].pt for m in dmatches])
 
     # Get with OpenCV
-    cvF, _ = cv2.findFundamentalMat(pts1, pts2, cv2.FM_RANSAC, threshold)
+    F, _ = cv2.findFundamentalMat(pts1, pts2, cv2.FM_RANSAC, threshold)
 
     print("opencv:")
-    print(cvF)
-    print(np.linalg.matrix_rank(cvF))
+    print(F)
+    print(np.linalg.matrix_rank(F))
 
     best_F = None
     best_inliers = []
+    final_pts1 = []
+    final_pts2 = []
 
     # Use RANSAC to estimate the fundamental matrix
     for i in range(N):
@@ -199,9 +201,6 @@ def reject_outliers(kp1, kp2, dmatches, N=15000, threshold=.005):
 
         # Estimate F using the 8-point algorithm
         F = estimate_fundamental_matrix(pts1_sample, pts2_sample)
-        # F = cv2.findFundamentalMat(pts1_sample, pts2_sample, cv2.FM_8POINT)[0]
-        # if F is None:
-            # continue
 
         # Count inliers
         inliers = []
@@ -228,11 +227,6 @@ def get_essential_mtx(K, F):
     """
 
     E = K.T @ F @ K
-    # U, _, V_T = np.linalg.svd(E)  # Singular Value Decomposition
-
-    # D = np.diag([1, 1, 0])
-
-    # E = U @ D @ V_T # Corrected Essential Matrix
     return E
 
 
@@ -245,12 +239,15 @@ def get_camera_pose(E):
         [0, 0, 1]
     ])
     # Computing all possible pairs
+    # Here C is Camera Centre
     C1 = U[:, 2]
     C2 = -U[:, 2]
 
     R1 = U @ W @ Vt
-    R2 = U @ W.T @ Vt
-    pose = [(C1, R1), (C2, R1), (C1, R2), (C2, R2)]
+    R2 = U @ W @ Vt
+    R3= U @ W.T @ Vt
+    R4 = U @ W.T @ Vt
+    pose = [(C1, R1), (C2, R2), (C1, R3), (C2, R4)]
     correct_pose = []
     for C, R in pose:
         if np.linalg.det(R) < 0:
@@ -305,6 +302,99 @@ def get_camera_pose(E):
 #
 #     return X_best, best_R, best_T, X_all
 
+# def get_skew_mat(a):
+#     return np.array([
+#         [0, -a[2], a[1]],
+#         [a[2], 0, -a[0]],
+#         [-a[1], a[0], 0]
+#     ])
+#
+#
+# def linear_triangulation(K, R, T, pose, final_pts1, final_pts2):
+#     I = np.identity(3)
+#     P1 = np.dot(K, np.dot(R, np.hstack((I, -T))))
+#     X_all = [] # List to store points for all four solutions
+#
+#     best_pose = 0
+#
+#     for (C, R2) in pose:
+#         X_current = []  # Points for current solution
+#         valid_point = []
+#         vp = {}
+#         positive_Z = 0
+#         C = C.reshape(3, 1)
+#         P2 = np.dot(K, np.dot(R2, np.hstack((I, -C))))
+#
+#         for i, (p1, p2) in enumerate(zip(final_pts1, final_pts2)):
+#             x1, y1 = p1
+#             x2, y2 = p2
+#
+#             p1 = np.array([x1, y1, 1])
+#             p2 = np.array([x2, y2, 1])
+#
+#             # Construct linear system A for current point
+#             A = np.vstack([
+#                 get_skew_mat(p1) @ P1,
+#                 get_skew_mat(p2) @ P2
+#             ])
+#
+#             # Solve using SVD
+#             _, _, Vt = np.linalg.svd(A)
+#             X = Vt[-1]  # Take the last row of Vt
+#             X_3d = X[:3] / X[3]
+#             # Store point for current solution
+#             X_current.append(X_3d)
+#             v = X_3d - C.flatten()
+#
+#             # Check cheirality condition
+#             r3 = R2[2, :]
+#             print("r3_shape", r3.shape)
+#             print("v", v.shape)
+#             print("dot product", np.dot(r3, v) )
+#             if np.dot(r3, v) > 0 and X_3d[2] > 0:
+#                 positive_Z += 1
+#                 #valid_point.append(X_3d)
+#                 #vp['j'] = X_3d
+#
+#         # Add all points for current solution to X_all
+#         X_all.append(X_current)
+#         if positive_Z > best_pose:
+#             best_pose = positive_Z
+#             #X_best = valid_point
+#             X_best = X_current
+#             best_R = R2
+#             best_T = C
+#
+#     # Convert lists to numpy arrays
+#     X_best = np.array(X_best)
+#     X_all = np.array(X_all)
+#     print("X_best", valid_point)
+#     print("mapping", vp)
+#
+#     return X_best, best_R, best_T, X_all
+
+def reprojection_error(X, x, R, C, K ):
+    I = np.identity(3)
+    P = np.dot(K, np.dot(R, np.hstack((I, -C))))
+    # rows of projection matrices P2
+    P1 = P[0, :].reshape(1, 4)
+    P2 = P[1, :].reshape(1, 4)
+    P3 = P[2, :].reshape(1, 4)
+
+    u, v = x
+
+    # Convert X to homogeneous coordinates
+    X = np.append(X, 1) if X.shape[0] == 3 else X
+
+    a = (np.dot(P1, X) / np.dot(P3, X))
+    b = (np.dot(P2, X) / np.dot(P3, X))
+    error_x = u - a
+    error_y = v - b
+
+    error = (u - a) ** 2 + (v - b) ** 2
+
+    return error, error_x, error_y
+
 def get_skew_mat(a):
     return np.array([
         [0, -a[2], a[1]],
@@ -313,70 +403,137 @@ def get_skew_mat(a):
     ])
 
 
-def linear_triangulation(K, R, T, pose, final_pts1, final_pts2):
-    I = np.identity(3)
-    P1 = np.dot(K, np.dot(R, np.hstack((I, -T))))
-    X_all = [] # List to store points for all four solutions
-    X_map = {}
 
-    best_pose = 0
+# def linear_triangulation(K, R, T, pose, final_pts1, final_pts2):
+#     I = np.identity(3)
+#     P1 = np.dot(K, np.dot(R, np.hstack((I, -T))))
+#     X_triangulated = []
+#     for (C, R2) in pose:
+#         print("Camera Centre and Rotation", (C, R2))
+#         X_current = []  # Points for current solution
+#         C = C.reshape(3, 1)
+#         P2 = np.dot(K, np.dot(R2, np.hstack((I, -C))))
+#         for i, (p1, p2) in enumerate(zip(final_pts1, final_pts2)):
+#             x1, y1 = p1
+#             x2, y2 = p2
+#
+#             p1 = np.array([x1, y1, 1])
+#             p2 = np.array([x2, y2, 1])
+#
+#             # Construct linear system A for current point
+#             A = np.vstack([
+#                 get_skew_mat(p1) @ P1,
+#                 get_skew_mat(p2) @ P2
+#             ])
+#
+#             # Solve using SVD
+#             _, _, Vt = np.linalg.svd(A)
+#             X = Vt[-1]  # Take the last row of Vt
+#             X_3d = X[:3] / X[3]
+#             # Store point for current solution
+#             X_current.append(X_3d)
+#         print("len(X_current)", len(X_current))
+#         X_triangulated.append(X_current)
+#         print("X_triangulated:", X_triangulated)
+#
+#     # checking chirality condition
+#     positive_depths = []
+#     for i, ((C, R) , X3d) in enumerate(zip(pose, X_triangulated)):
+#         depth = 0
+#         for j in range(len(X3d)):
+#             X = X3d[j].reshape(-1,1)
+#             r3 = R[2, :]
+#             #print("shape of r3", r3.shape)
+#             v = X - C.reshape(-1,1)
+#             #print("shape of dot product of r3 and v", np.dot(r3, v))
+#             #print("shape of v", v.shape)
+#             if np.dot(r3, v) > 0.1 and X[2] > 0.1:
+#                 depth = depth + 1
+#         positive_depths.append(depth)
+#     print("positive_depths:", positive_depths)
+#     max_depth = max(positive_depths)
+#     max_index = positive_depths.index(max_depth)
+#     X_best = X_triangulated[max_index]
+#     print(f" We found best Centre and Rotation matrix is pose{max_index+1}: {pose[max_index]}")
+#     # returning camera centre and rotation
+#
+#     return np.array(X_best), pose[max_index], X_triangulated
 
-    for (C, R2) in pose:
-        X_current = []  # Points for current solution
-        valid_point = []
-        vp = {}
-        positive_Z = 0
-        C = C.reshape(3, 1)
-        P2 = np.dot(K, np.dot(R2, np.hstack((I, -C))))
 
-        for i, (p1, p2) in enumerate(zip(final_pts1, final_pts2)):
-            x1, y1 = p1
-            x2, y2 = p2
+# def triangulate_points_cv(K, R1, T1, R2, T2, pts1, pts2):
+#     """
+#     Triangulate points using OpenCV's triangulatePoints function.
+#
+#     Parameters:
+#     K: Camera calibration matrix (3x3)
+#     R1, T1: Rotation and translation of first camera
+#     R2, T2: Rotation and translation of second camera
+#     pts1, pts2: Matched points in the two images
+#
+#     Returns:
+#     points_3d: Array of triangulated 3D points
+#     """
+#     # Compute projection matrices for both cameras
+#     P1 = np.dot(K, np.hstack((R1, T1)))
+#     P2 = np.dot(K, np.hstack((R2, T2)))
+#
+#     # Convert points to correct format
+#     pts1 = np.array(pts1).T
+#     pts2 = np.array(pts2).T
+#
+#     # Triangulate points
+#     points_4d = cv2.triangulatePoints(P1, P2, pts1, pts2)
+#
+#     # Convert from homogeneous coordinates to 3D
+#     points_3d = points_4d[:3] / points_4d[3]
+#
+#     return points_3d.T  # Transpose to get points as rows
 
-            p1 = np.array([x1, y1, 1])
-            p2 = np.array([x2, y2, 1])
+def triangulationlinear(K, R1, T1, R2, T2, fpts1,fpts2):
+    """
 
-            # Construct linear system A for current point
-            A = np.vstack([
-                get_skew_mat(p1) @ P1,
-                get_skew_mat(p2) @ P2
-            ])
 
-            # Solve using SVD
-            _, S, Vt = np.linalg.svd(A)
-            X = Vt[-1]  # Take the last row of Vt
-            X_3d = X[:3] / X[3]  # Convert from homogeneous coordinates
+    Parameters:
+    K: Camera calibration matrix (3x3)
+    R1, T1: Rotation and translation of first camera
+    R2, T2: Rotation and translation of second camera
+    pts1, pts2: Matched points in the two images
 
-            # Store point for current solution
-            X_current.append(X_3d)
-            v = X_3d - C.flatten()
+    Returns:
+    points_3d: Array of triangulated 3D points
+    """
+    # Compute projection matrices for both cameras
+    P1 = np.dot(K, np.hstack((R1, T1)))
+    P2 = np.dot(K, np.hstack((R2, T2)))
 
-            # Check cheirality condition
-            r3 = R2[2, :]
-            print("r3_shape", r3.shape)
-            print("v", v.shape)
-            print("dot product", np.dot(r3, v) )
-            if np.dot(r3, v) > 0 and X_3d[2] > 0:
-                positive_Z += 1
-                #valid_point.append(X_3d)
-                #vp['j'] = X_3d
+    # Normalize coordinates (optional but can improve stability)
+    K_inv = np.linalg.inv(K)
+    X_wp = []
+    for pts1, pts2 in zip(fpts1, fpts2):
+        x1, y1 = pts1
+        x2, y2 = pts2
+        p1  = np.array([x1, y1, 1])
+        p2 = np.array([x2, y2, 1])
 
-        # Add all points for current solution to X_all
-        X_all.append(X_current)
-        if positive_Z > best_pose:
-            best_pose = positive_Z
-            #X_best = valid_point
-            X_best = X_current
-            best_R = R2
-            best_T = C
+        # Optional: normalize coordinates
+        p1_norm = K_inv @ p1
+        p2_norm = K_inv @ p2
+        p1 = p1_norm
+        p2 = p2_norm
 
-    # Convert lists to numpy arrays
-    X_best = np.array(X_best)
-    X_all = np.array(X_all)
-    print("X_best", valid_point)
-    print("mapping", vp)
+        pts1_cross = get_skew_mat(p1)
+        pts2_cross = get_skew_mat(p2)
 
-    return X_best, best_R, best_T, X_all
+        A_1 = pts1_cross @ P1
+        A_2 = pts2_cross @ P2
+        A = np.vstack((A_1, A_2))
+
+        # Solve using SVD
+        _, _, Vt = np.linalg.svd(A)
+        X = Vt[-1]  # Take the last row of Vt
+        X_3d = X[:3] / X[3]
+        X_wp.append(X_3d)
+    return X_wp # Transpose to get points as rows
 
 
 def optimization(K, R1, T1, R2, T2, pts1, pts2, X_i):
@@ -419,35 +576,42 @@ def residuals(X_1, K, R, T, R2, T2, pts1, pts2):
     c = (np.dot(P2_1, X_1) / np.dot(P2_3, X_1))
     d = (np.dot(P2_2, X_1) / np.dot(P2_3, X_1))
 
-    geo_error_1 = (a - x1) ** 2 + (b - y1) ** 2
-    geo_error_2 = (c - x2) ** 2 + (d - y2) ** 2
-    error = geo_error_1 + geo_error_2
+    # geo_error_1 = (a - x1) ** 2 + (b - y1) ** 2
+    # geo_error_2 = (c - x2) ** 2 + (d - y2) ** 2
+    # error = geo_error_1 + geo_error_2
 
-    return error
+    error_x1 = a - x1
+    error_y1 = b - y1
+    error_x2 = c - x2
+    error_y2 = d - y2
+
+    return np.array([error_x1, error_y1, error_x2, error_y2]).flatten()
 
 
 def non_linear_triangulation(K, R1, T1, R2, T2, finalpts1, finalpts2, X):
     X_optimized = []
     initial_errors = []
     final_errors = []
+
     for pts1, pts2, X_i in zip(finalpts1, finalpts2, X):
-        # intial error
+        # Initial error
         initial_residuals = residuals(X_i[:3], K, R1, T1, R2, T2, pts1, pts2)
-        initial_error = np.sum(initial_residuals ** 2)
+        initial_error = np.sum(initial_residuals ** 2)  # Sum of squared residuals
         initial_errors.append(initial_error)
 
+        # Optimize
         X_opt = optimization(K, R1, T1, R2, T2, pts1, pts2, X_i)
         X_optimized.append(X_opt)
 
-        # final error
+        # Final error
         final_residuals = residuals(X_opt, K, R1, T1, R2, T2, pts1, pts2)
-        final_error = np.sum(final_residuals ** 2)
+        final_error = np.sum(final_residuals ** 2)  # Sum of squared residuals
         final_errors.append(final_error)
-
 
     print(f"Mean initial error: {np.mean(initial_errors):.6f}")
     print(f"Mean final error: {np.mean(final_errors):.6f}")
     print(f"Error reduction: {100 * (1 - np.mean(final_errors) / np.mean(initial_errors)):.2f}%")
+
     return np.array(X_optimized)
 
 
@@ -613,27 +777,6 @@ def LinearPnP(X3d,x2d,K):
 #
 #     return R, t, C, t_scale
 
-def reprojection_error(X, x, R, C, K ):
-    I = np.identity(3)
-    P = np.dot(K, np.dot(R, np.hstack((I, -C))))
-    # rows of projection matrices P2
-    P1 = P[0, :].reshape(1, 4)
-    P2 = P[1, :].reshape(1, 4)
-    P3 = P[2, :].reshape(1, 4)
-
-    u, v = x
-
-    # Convert X to homogeneous coordinates
-    X = np.append(X, 1) if X.shape[0] == 3 else X
-
-    a = (np.dot(P1, X) / np.dot(P3, X))
-    b = (np.dot(P2, X) / np.dot(P3, X))
-    error_x = u - a
-    error_y = v - b
-
-    error = (u - a) ** 2 + (v - b) ** 2
-
-    return error, error_x, error_y
 
 def PnPRANSAC(X3d, x2d, K, num_iter=1000, threshold=2.0):
     N = X3d.shape[0]
@@ -725,92 +868,139 @@ def NonlinearPnP(X3d, x2d, K, R_init, C_init):
     return  C_opt, R_opt
 
 
-def plot_dual_view_triangulation(points_data, x_min=None, x_max=None, z_min=None, z_max=None):
+def project_point_to_image(X, R, T, K):
     """
-    Create side-by-side plots showing X vs Y (front view) and X vs Z (top view)
-    of world points.
+    Project a 3D point to image coordinates.
 
     Parameters:
-    points_data: Either a single array of 3D points or a list of arrays of 3D points
-    x_min, x_max: Optional limits for X axis
-    z_min, z_max: Optional limits for Z axis
+    X: 3D point (3,) or (3,1)
+    R: Rotation matrix (3,3)
+    T: Translation vector (3,1)
+    K: Camera intrinsic matrix (3,3)
+
+    Returns:
+    x, y: image coordinates
     """
-    import matplotlib.pyplot as plt
-    import numpy as np
+    # Ensure X is shape (3,)
+    X = X.flatten()[:3]
 
-    # Create figure with two subplots side by side
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
+    # Make homogeneous 3D point
+    X_homo = np.append(X, 1)
 
-    # Ensure points_data is a list
-    if not isinstance(points_data, list):
-        points_data = [points_data]
+    # Construct projection matrix
+    I = np.identity(3)
+    #P = np.dot(K, np.dot(R, np.hstack((I, -T))))
+    P = np.dot(K, np.hstack((R, T)))
 
-    # Colors for different solutions
-    colors = ['blue', 'red', 'green', 'cyan']
 
-    # Plot points in both views
-    for i, points in enumerate(points_data):
-        points = np.array(points)
+    # Project point
+    x_proj_homo = np.dot(P, X_homo)
 
-        # Check if points is empty
-        if points.size == 0:
-            continue
+    # Convert from homogeneous to image coordinates
+    x_proj = x_proj_homo[:2] / x_proj_homo[2]
 
-        # Handle different array shapes
-        if len(points.shape) == 1:
-            # Try to reshape if it's a 1D array
-            if points.size % 3 == 0:
-                points = points.reshape(-1, 3)
-            else:
-                print(f"Warning: Cannot reshape points with shape {points.shape} into Nx3 array")
-                continue
+    return x_proj[0], x_proj[1]
 
-        # Now we should have a proper Nx3 array
-        try:
-            # Front view (X vs Y)
-            ax1.scatter(points[:, 0], points[:, 1],  # X vs Y coordinates
-                        c=colors[i % len(colors)], s=1, alpha=0.5,
-                        label=f'Solution {i + 1}')
+def projectedpointframe(R, T, R_final, C_final, K, X_final):
+    # Projecting points back to images after linear triangulation
+    # For frame 1 (reference frame)
+    R1 = R
+    T1 = T
+    T2 = -np.dot(R_final, C_final.reshape(3, 1))
+    # frame 1
+    projected_pts_frame1 = []
+    for point in X_final:
+        x, y = project_point_to_image(point, R1, T1, K)
+        projected_pts_frame1.append((x, y))
 
-            # Top view (X vs Z)
-            ax2.scatter(points[:, 0], points[:, 2],  # X vs Z coordinates
-                        c=colors[i % len(colors)], s=1, alpha=0.5)
-        except IndexError as e:
-            print(f"Error plotting points with shape {points.shape}: {e}")
-            print("First few elements:", points[:min(5, len(points))])
-            continue
+    # For frame 2
+    projected_pts_frame2 = []
+    for point in X_final:
+       # x, y = project_point_to_image(point, R_final, C_final, K)
+        x, y = project_point_to_image(point, R_final, T2, K)
+        projected_pts_frame2.append((x, y))
 
-    # Set labels and titles
-    ax1.set_xlabel('X')
-    ax1.set_ylabel('Y')
-    ax1.set_title('Front View (X vs Y)')
+    return np.array(projected_pts_frame1), np.array(projected_pts_frame2)
 
-    ax2.set_xlabel('X')
-    ax2.set_ylabel('Z')
-    ax2.set_title('Top View (X vs Z)')
+def mean_reprojection_error(fpts1, fpts2, X_final, R, T, R_final, C_final, K):
+    # Reprojection error after linear triangulation
+    total_error_1 = []  # frame 1
+    total_error_2 = []  # frame 2
+    for pts1, pts2, X in zip(fpts1, fpts2, X_final):
+        error_1, _, _ = reprojection_error(X, pts1, R, T, K)
+       # print(f"Error for pts1{error_1}")
+        total_error_1.append(error_1)
+        error_2, _, _ = reprojection_error(X, pts2, R_final, C_final, K)
+        #print(f"Error for pts2{error_2}")
+        total_error_2.append(error_2)
+    mean_error_1 = np.mean(total_error_1)
+    mean_error_2 = np.mean(total_error_2)
+    Mean_Error = (mean_error_1 + mean_error_2) / 2.0
+    return  mean_error_1, mean_error_2, Mean_Error
 
-    # Add grid to both plots
-    ax1.grid(True, linestyle='--', alpha=0.3)
-    ax2.grid(True, linestyle='--', alpha=0.3)
 
-    # Set equal aspect ratio for both plots
-    ax1.axis('equal')
-    ax2.axis('equal')
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
 
-    # Add legend to the first plot only
-    ax1.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
 
-    # Set specific X and Z axis limits if provided
-    if x_min is not None and x_max is not None:
-        ax1.set_xlim(x_min, x_max)
-        ax2.set_xlim(x_min, x_max)
+def visualize_3d_points(X_final, C_final, X_optimized=None,  title="3D Points Visualization"):
+    """
+    Create a 3D scatter plot to visualize triangulated points.
 
-    if z_min is not None and z_max is not None:
-        ax2.set_ylim(z_min, z_max)  # Z axis is the Y-axis in the second plot
+    Parameters:
+    X_final: Original triangulated points from linear triangulation
+    X_optimized: Optimized points from non-linear optimization (optional)
+    title: Plot title
+    """
+    fig = plt.figure(figsize=(10, 8))
+    ax = fig.add_subplot(111, projection='3d')
 
-    # Adjust layout to prevent overlap
+    # Extract X, Y, Z coordinates
+    X = X_final[:, 0]
+    Y = X_final[:, 1]
+    Z = X_final[:, 2]
+
+    # Plot original points
+    ax.scatter(X, Y, Z, c='blue', marker='o', label='Linear Triangulation', alpha=0.6)
+
+    # Plot optimized points if provided
+    if X_optimized is not None:
+        X_opt = X_optimized[:, 0]
+        Y_opt = X_optimized[:, 1]
+        Z_opt = X_optimized[:, 2]
+        ax.scatter(X_opt, Y_opt, Z_opt, c='red', marker='^', label='Non-Linear Optimization', alpha=0.6)
+
+    # Add camera positions
+    # For the first camera at the origin
+    ax.scatter(0, 0, 0, c='green', marker='s', s=100, label='Camera 1')
+
+    # For the second camera (if you have the position)
+    # Use C_final which is the camera center
+    if 'C_final' in globals():
+        ax.scatter(C_final[0], C_final[1], C_final[2], c='purple', marker='s', s=100, label='Camera 2')
+
+    # Set labels and title
+    ax.set_xlabel('X')
+    ax.set_ylabel('Y')
+    ax.set_zlabel('Z')
+    ax.set_title(title)
+
+    # Add a legend
+    ax.legend()
+
+    # Set reasonable limits based on data
+    # You might need to adjust these based on your specific data
+    max_range = np.max([np.max(np.abs(X)), np.max(np.abs(Y)), np.max(np.abs(Z))])
+    ax.set_xlim(-max_range, max_range)
+    ax.set_ylim(-max_range, max_range)
+    ax.set_zlim(-max_range, max_range)
+
+    # Display the plot
     plt.tight_layout()
+    plt.savefig('3d_points_visualization.png', dpi=300)
     plt.show()
+
+
 
 def main():
     # Set data folder and number of images
@@ -872,31 +1062,188 @@ def main():
     pose = get_camera_pose(E)
     print(f"Camera pose {pose}")
 
-    # Linear triangulation
-    # Rotation and translation of base frame
+    # For each possible pose
+    triangulated_points = []
+
+    # First camera is at origin
+    R1 = np.identity(3)
+    T1 = np.zeros((3, 1))
+
+    for C, R in pose:
+        # Convert camera center to translation
+        T2 = -np.dot(R, C.reshape(3, 1))
+
+        # Triangulate points
+        points_3d = triangulationlinear(K, R1, T1, R, T2, fpts1, fpts2)
+        triangulated_points.append(points_3d)
+
+    # Now check which pose gives the most points in front of both cameras
+    best_pose_idx = 0
+    max_valid_points = 0
+
+    for i, (points, (C, R)) in enumerate(zip(triangulated_points, pose)):
+        # Check cheirality condition
+        valid_points = 0
+        for pt in points:
+            z1 = pt[2]
+            if z1 > 0:
+                # Check if point is in front of second camera
+                r3 = R[2, :]
+                v = pt - C.reshape(3)
+                if np.dot(r3, v) > 0:
+                    valid_points += 1
+        print(f"Pose {i + 1}: {valid_points} valid points")
+        if valid_points > max_valid_points:
+            max_valid_points = valid_points
+            best_pose_idx = i
+            print(f"Best pose: {best_pose_idx}")
+
+    # Get the best pose and points
+    X_final = np.array(triangulated_points[best_pose_idx])
+    C_final = pose[best_pose_idx][0].reshape(3,1)
+    R_final = pose[best_pose_idx][1]
+    print("triangulated points:", triangulated_points)
+    print("length of triangulated points:", len(triangulated_points))
+
+   #  # Linear triangulation
+   #  # Rotation and translation of base frame
     R = np.identity(3)
     T = np.zeros((3, 1))
+   #  #X_final, R_final, C_final, wp = linear_triangulation(K, R, T, pose, fpts1, fpts2)
+   #  X_final, camera_pose, wp= linear_triangulation(K, R, T, pose, fpts1, fpts2)
+   #  R_final = np.array(camera_pose[1]).reshape(3,3)
+   #  C_final = np.array(camera_pose[0]).reshape(3, 1)
+   # # C_final = - C_final
+   # #  translation = - np.dot(R_final, C_final)
+   # #  print(f"Translation {translation}")
+   #  # Define colors for different solutions
+    colors = ['blue', 'green', 'red', 'orange']
+    plt.figure(figsize=(10, 8))
+    # For each camera pose solution
+    for i, points in enumerate(triangulated_points):
+        if len(points) == 0:
+            continue
 
-    X_final, R_final, T_final, all_world_points = linear_triangulation(K, R, T, pose, fpts1, fpts2)
+        # Convert to numpy array if it's not already
+        points_array = np.array(points)
+
+        # Extract x and z coordinates
+        x_coords = points_array[:, 0]
+        z_coords = points_array[:, 2]
+
+        # Plot with a specific color
+        color = colors[i % len(colors)]
+        plt.scatter(x_coords, z_coords, color=color, s=10, alpha=0.7,
+                    label=f'Camera pose {i + 1}')
+
+    # Configure the plot to match your example
+    plt.grid(True)
+    plt.xlabel('X')
+    plt.ylabel('Z')
+    plt.title('X vs Z Coordinates for Different Camera Poses')
+    plt.legend()
+
+    # Add equal aspect ratio to maintain proper scaling
+    plt.axis('equal')
+
+    # Save and show
+    plt.savefig('x_vs_z_triangulation.png', dpi=300)
+    plt.show()
+
+    _, R_cv, t_cv ,_ = cv2.recoverPose(E, fpts1, fpts2)
+    print("R_cv:", R_cv)
+    print("t_cv:", t_cv)
     print("best_R", R_final)
-    print("best_T", T_final)
-    print(all_world_points.shape)
+    print("best_T", C_final)
 
-    # print("X:", X)
-    #print("length of X:", len(X))
+    #Reprojection error after linear triangulation
+    error_1, error_2, reproj_errors = mean_reprojection_error(fpts1, fpts2, X_final, R, T, R_final, C_final, K)
+    print(f"Mean Reprojection error after linear triangulation error: {reproj_errors}")
+    print(f"Reprojection error after linear triangulation frame 1: {error_1}")
+    print(f"Reprojection error after linear triangulation frame 2: {error_2}")
+
+
+    # Projected Points after linear triangulation
+    projected_pts_frame1, projected_pts_frame2  = projectedpointframe(R, T, R_final, C_final, K, X_final)
+    # Draw projected points on frame 1
+    img1_with_points = images[0].copy()
+    for pt in projected_pts_frame1:
+        x, y = int(round(pt[0])), int(round(pt[1]))
+        cv2.circle(img1_with_points, (x, y), 2, (0, 255, 0), -1)  # Green circles
+    # Draw original matched points on frame 1
+    for pt in fpts1:
+        x, y = int(round(pt[0])), int(round(pt[1]))
+        cv2.circle(img1_with_points, (x, y), 2, (0, 0, 255), -1)  # Red circles
+
+    # Similarly for frame 2
+    img2_with_points = images[1].copy()  # Assuming images[1] is frame 2
+    for pt in projected_pts_frame2:
+        x, y = int(round(pt[0])), int(round(pt[1]))
+        cv2.circle(img2_with_points, (x, y), 2, (0, 255, 0), -1)  # Green circles
+
+    for pt in fpts2:
+        x, y = int(round(pt[0])), int(round(pt[1]))
+        cv2.circle(img2_with_points, (x, y), 2, (0, 0, 255), -1)  # Red circles
+
+    # Display the images
+    cv2.imshow("Frame 1 after linear triangulation- Green: Projected, Red: Original", img1_with_points)
+    cv2.imwrite("Frame1 - lineartriangulation.jpg", img1_with_points)
+    cv2.imshow("Frame 2 after linear triangulation  - Green: Projected, Red: Original", img2_with_points)
+    cv2.imwrite("Frame2 - lineartriangulation.jpg", img2_with_points)
+
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
+
 
     # Nonlinear triangulation
-    X_optimized = non_linear_triangulation(K, R, T, R_final, T_final, fpts1, fpts2, X_final)
+    X_optimized = non_linear_triangulation(K, R, T, R_final, C_final, fpts1, fpts2, X_final)
     X_optimized = np.array(X_optimized)
-    print("X_final shape:", X_final.shape)  # Check the shape
+    # Check the shape
 
-    # Try reshaping if needed
-    if len(X_final.shape) == 1 and X_final.size % 3 == 0:
-        X_final_reshaped = X_final.reshape(-1, 3)
-        plot_dual_view_triangulation([X_final_reshaped], x_min=-200, x_max=200, z_min=-1000, z_max=1000)
-    else:
-        # If it's already a 2D array with the right shape
-        plot_dual_view_triangulation([X_final], x_min=-200, x_max=200, z_min=-1000, z_max=1000)
+    # Reprojection error after non linear triangulation
+    error_frame1, error_frame2, reproj_error  = mean_reprojection_error(fpts1, fpts2, X_optimized, R, T, R_final, C_final, K)
+    print(f"Mean Reprojection error after non linear triangulation error: {reproj_error}")
+    print(f"Reprojection error after non linear triangulation frame 1: {error_frame1}")
+    print(f"Reprojection error after non linear triangulation frame 1: {error_frame2}")
+
+
+
+    # Projection after non_linear triangulation
+    proj_frame1, proj_frame2 = projectedpointframe(R, T, R_final, C_final, K, X_optimized)
+
+    # Draw projected points on frame 1
+    img1_with_points = images[0].copy()
+    for pt in proj_frame1:
+        x, y = int(round(pt[0])), int(round(pt[1]))
+        cv2.circle(img1_with_points, (x, y), 2, (0, 255, 0), -1)  # Green circles
+
+    # Draw original matched points on frame 1
+    for pt in fpts1:
+        x, y = int(round(pt[0])), int(round(pt[1]))
+        cv2.circle(img1_with_points, (x, y), 2, (0, 0, 255), -1)  # Red circles
+
+    #  frame 2
+    img2_with_points = images[1].copy()  # Assuming images[1] is frame 2
+    for pt in proj_frame2:
+        x, y = int(round(pt[0])), int(round(pt[1]))
+        cv2.circle(img2_with_points, (x, y), 2, (0, 255, 0), -1)  # Green circles
+
+    for pt in fpts2:
+        x, y = int(round(pt[0])), int(round(pt[1]))
+        cv2.circle(img2_with_points, (x, y), 2, (0, 0, 255), -1)  # Red circles
+
+    # Display the images
+    cv2.imshow("Frame 1 after non-linear triangulation - Green: Projected, Red: Original", img1_with_points)
+    cv2.imwrite("Frame1 - nonlineartriangulation.jpg", img1_with_points)
+    cv2.imshow("Frame 2  after non-linear triangulation- Green: Projected, Red: Original", img2_with_points)
+    cv2.imwrite("Frame2 -non lineartriangulation.jpg", img2_with_points)
+
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
+
+    # Call this function after triangulation and optimization
+    visualize_3d_points(X_final, C_final, X_optimized)
+    # Create scatter plot comparing original and optimized Z values
 
 
     # matching 3rd image
@@ -943,30 +1290,29 @@ def main():
                 x_2d.append(pts3[j])
                 break
 
+    # Convert to numpy arrays
     X_3d = np.array(X_3d)
     x_2d = np.array(x_2d)
     print(f"Found {len(X_3d)} correspondences for PnP")
-    
+
     # Check if we have enough correspondences
     if len(X_3d) < 6:
         print("Warning: Not enough correspondences for reliable PnP")
         # Don't return here unless this is in a function
         # return None, None, None, None
 
-    #Linear PnP
     camera_pose_3 = LinearPnP(X_3d, x_2d, K)
     C_3, R_3 = camera_pose_3
     print(f"Rotation: {R_3}, Centre: {C_3}")
 
-    #PnP RanSac
     R_opt_3, C_opt_3, inliers_3= PnPRANSAC(X_3d, x_2d, K)
     print(f" Rotation after pnp ransac for view3: {R_opt_3}, Centre for view3: {C_opt_3}")
 
-    # Nonlinear PnP
+    # Non linear PnP
     final_Copt_3, final_Ropt_3 = NonlinearPnP(X_3d, x_2d, K, R_opt_3, C_opt_3)
     print(f"Rotation and centre for camera 3 after Non linear PnP:{final_Ropt_3}, {final_Copt_3}")
 
- 
+
 
 if __name__ == '__main__':
     main()
