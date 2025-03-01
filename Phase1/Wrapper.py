@@ -180,16 +180,14 @@ def reject_outliers(kp1, kp2, dmatches, N=15000, threshold=.005):
     pts2 = np.array([kp2[m.trainIdx].pt for m in dmatches])
 
     # Get with OpenCV
-    F, _ = cv2.findFundamentalMat(pts1, pts2, cv2.FM_RANSAC, threshold)
+    cvF, _ = cv2.findFundamentalMat(pts1, pts2, cv2.FM_RANSAC, threshold)
 
     print("opencv:")
-    print(F)
-    print(np.linalg.matrix_rank(F))
+    print(cvF)
+    print(np.linalg.matrix_rank(cvF))
 
     best_F = None
     best_inliers = []
-    final_pts1 = []
-    final_pts2 = []
 
     # Use RANSAC to estimate the fundamental matrix
     for i in range(N):
@@ -200,6 +198,9 @@ def reject_outliers(kp1, kp2, dmatches, N=15000, threshold=.005):
 
         # Estimate F using the 8-point algorithm
         F = estimate_fundamental_matrix(pts1_sample, pts2_sample)
+        # F = cv2.findFundamentalMat(pts1_sample, pts2_sample, cv2.FM_8POINT)[0]
+        # if F is None:
+            # continue
 
         # Count inliers
         inliers = []
@@ -227,6 +228,11 @@ def get_essential_mtx(K, F):
     """
 
     E = K.T @ F @ K
+    # U, _, V_T = np.linalg.svd(E)  # Singular Value Decomposition
+
+    # D = np.diag([1, 1, 0])
+
+    # E = U @ D @ V_T # Corrected Essential Matrix
     return E
 
 def get_camera_pose(E):
@@ -331,7 +337,7 @@ def linear_triangulation(K, R, T, pose, final_pts1, final_pts2):
             ])
 
             # Solve using SVD
-            _, _, Vt = np.linalg.svd(A)
+            _, S, Vt = np.linalg.svd(A)
             X = Vt[-1]  # Take the last row of Vt
             X_3d = X[:3] / X[3]  # Convert from homogeneous coordinates
 
