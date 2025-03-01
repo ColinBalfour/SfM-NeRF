@@ -814,8 +814,8 @@ def plot_dual_view_triangulation(points_data, x_min=None, x_max=None, z_min=None
 
 def main():
     # Set data folder and number of images
-    path = "D:/Computer vision/Homeworks/5. Project 2 - Phase1/YourDirectoryID_p2 (1)/YourDirectoryID_p2/Phase1/P2Data/P2Data"
-    #path = ""
+    # path = "D:/Computer vision/Homeworks/5. Project 2 - Phase1/YourDirectoryID_p2 (1)/YourDirectoryID_p2/Phase1/P2Data/P2Data"
+    path = ""
     num_imgs = 5
 
     # Load images (which are already undistorted and resized to 800x600px)
@@ -823,7 +823,8 @@ def main():
     if len(images) < 2:
         print("Need at least two images to match.")
         return
-    path2 = "D:/Computer vision/Homeworks/5. Project 2 - Phase1/YourDirectoryID_p2 (1)/YourDirectoryID_p2/Phase1/P2Data/P2Data"
+    # path2 = "D:/Computer vision/Homeworks/5. Project 2 - Phase1/YourDirectoryID_p2 (1)/YourDirectoryID_p2/Phase1/P2Data/P2Data"
+    path2 = "Data"
 
     # Load camera calibration parameters (intrinsic matrix K) if needed
     calib_file = os.path.join(path2, "calibration.txt")
