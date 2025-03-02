@@ -131,9 +131,13 @@ def parse_matching_files(folder_path, num_images):
             n_features = int(line.split(':')[1].strip())
 
             # For each feature in matching{i_ref}.txt
-            for _ in range(n_features):
-                line = f.readline().strip()
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
                 tokens = line.split()
+                
+                # print(_, tokens, n_features, i_ref)
 
                 num_matches = int(tokens[0])
                 R, G, B = map(int, tokens[1:4])
@@ -148,7 +152,8 @@ def parse_matching_files(folder_path, num_images):
 
                 # For each matched image
                 idx = 6
-                for _m in range(num_matches):
+                # print(tokens)
+                for _m in range(num_matches-1):
                     j = int(tokens[idx])
                     u_j = float(tokens[idx + 1])
                     v_j = float(tokens[idx + 2])
@@ -261,7 +266,7 @@ def refine_all_matches(matches_dict,
         # 4) For each outlier, remove references from all_feature_points and the mask
         for outlier in outliers:
             # outlier is (u_i, v_i, u_j, v_j, f_idx)
-            f_idx = outlier[-1]
+            f_idx = int(outlier[-1])
 
             # Remove i's observation from the feature dictionary
             if i in all_feature_points[f_idx]:
@@ -279,63 +284,6 @@ def refine_all_matches(matches_dict,
                 all_feature_points[f_idx] = {}  # or None, if you prefer
 
     return refined_matches_dict, all_feature_points, visibility_mask_per_image
-
-
-
-
-def project_point_to_image(X, R, T, K):
-    """
-    Project a 3D point to image coordinates.
-
-    Parameters:
-    X: 3D point (3,) or (3,1)
-    R: Rotation matrix (3,3)
-    T: Translation vector (3,1)
-    K: Camera intrinsic matrix (3,3)
-
-    Returns:
-    x, y: image coordinates
-    """
-    # Ensure X is shape (3,)
-    X = X.flatten()[:3]
-
-    # Make homogeneous 3D point
-    X_homo = np.append(X, 1)
-
-    # Construct projection matrix
-    I = np.identity(3)
-    #P = np.dot(K, np.dot(R, np.hstack((I, -T))))
-    P = np.dot(K, np.hstack((R, T)))
-
-
-    # Project point
-    x_proj_homo = np.dot(P, X_homo)
-
-    # Convert from homogeneous to image coordinates
-    x_proj = x_proj_homo[:2] / x_proj_homo[2]
-
-    return x_proj[0], x_proj[1]
-
-def projectedpointframe(R, T, R_final, C_final, K, X_final):
-    # Projecting points back to images after linear triangulation
-    # For frame 1 (reference frame)
-    R1 = R
-    T1 = T
-    T2 = -np.dot(R_final, C_final.reshape(3, 1))
-    # frame 1
-    projected_pts_frame1 = []
-    for point in X_final:
-        x, y = project_point_to_image(point, R1, T1, K)
-        projected_pts_frame1.append((x, y))
-
-    # For frame 2
-    projected_pts_frame2 = []
-    for point in X_final:
-       # x, y = project_point_to_image(point, R_final, C_final, K)
-        x, y = project_point_to_image(point, R_final, T2, K)
-        projected_pts_frame2.append((x, y))
-
-    return np.array(projected_pts_frame1), np.array(projected_pts_frame2)
 
 
 def visualize_3d_points(X_final, C_final, X_optimized=None,  title="3D Points Visualization"):
@@ -459,17 +407,20 @@ def triangulate(K, R1, T1, im1, im2, kp1, kp2, dmatches, show=False):
     
     fpts1 = np.array([kp1[m.queryIdx].pt for m in dmatches])
     fpts2 = np.array([kp2[m.trainIdx].pt for m in dmatches])
-    F = estimate_fundamental_matrix(fpts1, fpts2, dmatches)
+    F = estimate_fundamental_matrix(fpts1, fpts2)
 
-    print("Estimated fundamental matrix F:")
-    print(F)
+    if show:
+        print("Estimated fundamental matrix F:")
+        print(F)
 
     E = get_essential_mtx(K, F)
-    print("Estimated essential matrix E:")
-    print(E)
+    if show:
+        print("Essential matrix E:")
+        print(E)
 
     pose = get_camera_pose(E)
-    print(f"Camera pose {pose}")
+    if show:
+        print(f"Camera pose {pose}")
 
     # For each possible pose
     triangulated_points = []
@@ -485,9 +436,6 @@ def triangulate(K, R1, T1, im1, im2, kp1, kp2, dmatches, show=False):
     X_final, C_final, R_final = chirality_condition(triangulated_points, pose)
     # print("triangulated points:", triangulated_points)
     print("length of triangulated points:", len(triangulated_points))
-    
-    R = np.identity(3)
-    T = np.zeros((3, 1))
     
     colors = ['blue', 'green', 'red', 'orange']
     plt.figure(figsize=(10, 8))
@@ -525,96 +473,95 @@ def triangulate(K, R1, T1, im1, im2, kp1, kp2, dmatches, show=False):
     else:
         plt.close()
     
-    _, R_cv, t_cv ,_ = cv2.recoverPose(E, fpts1, fpts2)
-    print("R_cv:", R_cv)
-    print("t_cv:", t_cv)
-    print("best_R", R_final)
-    print("best_T", C_final)
+    if show:
+        _, R_cv, t_cv ,_ = cv2.recoverPose(E, fpts1, fpts2)
+        print("R_cv:", R_cv)
+        print("t_cv:", t_cv)
+        print("best_R", R_final)
+        print("best_T", C_final)
 
-    #Reprojection error after linear triangulation
-    error_1, error_2, reproj_errors = mean_reprojection_error(fpts1, fpts2, X_final, R, T, R_final, C_final, K)
-    print(f"Mean Reprojection error after linear triangulation error: {reproj_errors}")
-    print(f"Reprojection error after linear triangulation frame 1: {error_1}")
-    print(f"Reprojection error after linear triangulation frame 2: {error_2}")
-    
-    # Projected Points after linear triangulation
-    projected_pts_frame1, projected_pts_frame2  = projectedpointframe(R, T, R_final, C_final, K, X_final)
-    # Draw projected points on frame 1
-    img1_with_points = im1.copy()
-    for pt in projected_pts_frame1:
-        x, y = int(round(pt[0])), int(round(pt[1]))
-        cv2.circle(img1_with_points, (x, y), 2, (0, 255, 0), -1)  # Green circles
-    # Draw original matched points on frame 1
-    for pt in fpts1:
-        x, y = int(round(pt[0])), int(round(pt[1]))
-        cv2.circle(img1_with_points, (x, y), 2, (0, 0, 255), -1)  # Red circles
+        #Reprojection error after linear triangulation
+        error_1, error_2, reproj_errors = mean_reprojection_error(fpts1, fpts2, X_final, R1, T1, R_final, C_final, K)
+        print(f"Mean Reprojection error after linear triangulation error: {reproj_errors}")
+        print(f"Reprojection error after linear triangulation frame 1: {error_1}")
+        print(f"Reprojection error after linear triangulation frame 2: {error_2}")
+        
+        # Projected Points after linear triangulation
+        projected_pts_frame1, projected_pts_frame2  = projectedpointframe(R1, T1, R_final, C_final, K, X_final)
+        # Draw projected points on frame 1
+        img1_with_points = im1.copy()
+        for pt in projected_pts_frame1:
+            x, y = int(round(pt[0])), int(round(pt[1]))
+            cv2.circle(img1_with_points, (x, y), 2, (0, 255, 0), -1)  # Green circles
+        # Draw original matched points on frame 1
+        for pt in fpts1:
+            x, y = int(round(pt[0])), int(round(pt[1]))
+            cv2.circle(img1_with_points, (x, y), 2, (0, 0, 255), -1)  # Red circles
 
-    # Similarly for frame 2
-    img2_with_points = im2.copy()  # Assuming images[1] is frame 2
-    for pt in projected_pts_frame2:
-        x, y = int(round(pt[0])), int(round(pt[1]))
-        cv2.circle(img2_with_points, (x, y), 2, (0, 255, 0), -1)  # Green circles
+        # Similarly for frame 2
+        img2_with_points = im2.copy()  # Assuming images[1] is frame 2
+        for pt in projected_pts_frame2:
+            x, y = int(round(pt[0])), int(round(pt[1]))
+            cv2.circle(img2_with_points, (x, y), 2, (0, 255, 0), -1)  # Green circles
 
-    for pt in fpts2:
-        x, y = int(round(pt[0])), int(round(pt[1]))
+        for pt in fpts2:
+            x, y = int(round(pt[0])), int(round(pt[1]))
         cv2.circle(img2_with_points, (x, y), 2, (0, 0, 255), -1)  # Red circles
 
-    # Display the images
-    if show:
+        # Display the images
         cv2.imshow("Frame 1 after linear triangulation- Green: Projected, Red: Original", img1_with_points)
         cv2.imshow("Frame 2 after linear triangulation  - Green: Projected, Red: Original", img2_with_points)
         cv2.waitKey(0)
         cv2.destroyAllWindows()
     
-    cv2.imwrite("Frame1 - lineartriangulation.jpg", img1_with_points)
-    cv2.imwrite("Frame2 - lineartriangulation.jpg", img2_with_points)
+        cv2.imwrite("Frame1 - lineartriangulation.jpg", img1_with_points)
+        cv2.imwrite("Frame2 - lineartriangulation.jpg", img2_with_points)
 
     # Nonlinear triangulation
-    X_optimized = non_linear_triangulation(K, R, T, R_final, C_final, fpts1, fpts2, X_final)
+    X_optimized = non_linear_triangulation(K, R1, T1, R_final, C_final, fpts1, fpts2, X_final)
     X_optimized = np.array(X_optimized)
     # Check the shape
 
-    # Reprojection error after non linear triangulation
-    error_frame1, error_frame2, reproj_error  = mean_reprojection_error(fpts1, fpts2, X_optimized, R, T, R_final, C_final, K)
-    print(f"Mean Reprojection error after non linear triangulation error: {reproj_error}")
-    print(f"Reprojection error after non linear triangulation frame 1: {error_frame1}")
-    print(f"Reprojection error after non linear triangulation frame 1: {error_frame2}")
-
-    # Projection after non_linear triangulation
-    proj_frame1, proj_frame2 = projectedpointframe(R, T, R_final, C_final, K, X_optimized)
-
-    # Draw projected points on frame 1
-    img1_with_points = im1.copy()
-    for pt in proj_frame1:
-        x, y = int(round(pt[0])), int(round(pt[1]))
-        cv2.circle(img1_with_points, (x, y), 2, (0, 255, 0), -1)  # Green circles
-
-    # Draw original matched points on frame 1
-    for pt in fpts1:
-        x, y = int(round(pt[0])), int(round(pt[1]))
-        cv2.circle(img1_with_points, (x, y), 2, (0, 0, 255), -1)  # Red circles
-
-    #  frame 2
-    img2_with_points = im2.copy()  # Assuming images[1] is frame 2
-    for pt in proj_frame2:
-        x, y = int(round(pt[0])), int(round(pt[1]))
-        cv2.circle(img2_with_points, (x, y), 2, (0, 255, 0), -1)  # Green circles
-
-    for pt in fpts2:
-        x, y = int(round(pt[0])), int(round(pt[1]))
-        cv2.circle(img2_with_points, (x, y), 2, (0, 0, 255), -1)  # Red circles
-
-    # Display the images
     if show:
+        # Reprojection error after non linear triangulation
+        error_frame1, error_frame2, reproj_error  = mean_reprojection_error(fpts1, fpts2, X_optimized, R1, T1, R_final, C_final, K)
+        print(f"Mean Reprojection error after non linear triangulation error: {reproj_error}")
+        print(f"Reprojection error after non linear triangulation frame 1: {error_frame1}")
+        print(f"Reprojection error after non linear triangulation frame 1: {error_frame2}")
+
+        # Projection after non_linear triangulation
+        proj_frame1, proj_frame2 = projectedpointframe(R1, T1, R_final, C_final, K, X_optimized)
+
+        # Draw projected points on frame 1
+        img1_with_points = im1.copy()
+        for pt in proj_frame1:
+            x, y = int(round(pt[0])), int(round(pt[1]))
+            cv2.circle(img1_with_points, (x, y), 2, (0, 255, 0), -1)  # Green circles
+
+        # Draw original matched points on frame 1
+        for pt in fpts1:
+            x, y = int(round(pt[0])), int(round(pt[1]))
+            cv2.circle(img1_with_points, (x, y), 2, (0, 0, 255), -1)  # Red circles
+
+        #  frame 2
+        img2_with_points = im2.copy()  # Assuming images[1] is frame 2
+        for pt in proj_frame2:
+            x, y = int(round(pt[0])), int(round(pt[1]))
+            cv2.circle(img2_with_points, (x, y), 2, (0, 255, 0), -1)  # Green circles
+
+        for pt in fpts2:
+            x, y = int(round(pt[0])), int(round(pt[1]))
+            cv2.circle(img2_with_points, (x, y), 2, (0, 0, 255), -1)  # Red circles
+
+        # Display the images
         cv2.imshow("Frame 1 after non-linear triangulation - Green: Projected, Red: Original", img1_with_points)
         cv2.imshow("Frame 2  after non-linear triangulation- Green: Projected, Red: Original", img2_with_points)
         cv2.waitKey(0)
         cv2.destroyAllWindows()
     
-    cv2.imwrite("Frame1 - nonlineartriangulation.jpg", img1_with_points)
-    cv2.imwrite("Frame2 -non lineartriangulation.jpg", img2_with_points)
+        cv2.imwrite("Frame1 - nonlineartriangulation.jpg", img1_with_points)
+        cv2.imwrite("Frame2 -non lineartriangulation.jpg", img2_with_points)
 
-    
 
     # Call this function after triangulation and optimization
     if show:
@@ -629,7 +576,7 @@ def get_pose(i, obj_points, img_points, K):
 
         if len(inliers_pnp) < 6:
             print(f"Not enough inliers for reliable PnP with image {i + 1}")
-            return
+            return None, None
 
         # Calculate reprojection error after linear PnP
         errorLinearPnP = reprojectionErrorPnP(obj_points[inliers_pnp], img_points[inliers_pnp], K, R_init, C_init)
@@ -642,7 +589,7 @@ def get_pose(i, obj_points, img_points, K):
         
     except Exception as e:
         print(f"Error in PnP for image {i + 1}: {e}")
-        return
+        return None, None
      
 
 
@@ -671,7 +618,7 @@ def main():
         return
     
     # Load matching files
-    matches_dict, all_feature_points, visibility_mask = parse_matching_files(path2)
+    matches_dict, all_feature_points, visibility_mask = parse_matching_files(path2, len(images))
     refined_matches, all_feature_points, visibility_mask = refine_all_matches(matches_dict, all_feature_points, visibility_mask)
     
     # Get the first two images and their matches
@@ -684,7 +631,7 @@ def main():
     camera_info = {
         1: {
             'R': np.eye(3),
-            'C': np.zeros(3),
+            'C': np.zeros((3, 1)),
         }
     }
     C, R, X12 = triangulate(K, camera_info[1]['R'], camera_info[1]['C'], img1, img2, kp1, kp2, dmatches, show=True)
@@ -693,7 +640,7 @@ def main():
     fIdx_to_3D = {}
     for idx, match in enumerate(matches):
         # match is (u1, v1, u2, v2, f_idx)
-        f_idx = match[-1]
+        f_idx = int(match[-1])
         fIdx_to_3D[f_idx] = X12[idx]  # one 3D point per match
     
     for i in range(3, len(images)+1):
@@ -734,8 +681,8 @@ def main():
         # Now triangulate new points between this camera and all previous cameras
         for j in range(1, i):  # For all previous cameras
             print(f"  Triangulating between {i} and {j} ...")
-            img1 = images[j]
-            img2 = images[i]
+            img1 = images[j-1]
+            img2 = images[i-1]
             
             pair_key = (j, i)
             if pair_key not in refined_matches:
@@ -753,7 +700,7 @@ def main():
             
             # Each row in Xnew corresponds to matches[idx], which is (u_j,v_j, u_i,v_i, f_idx)
             for idx2, match in enumerate(matches):
-                f_idx = match[-1]
+                f_idx = int(match[-1])
                 
                 # NOTE: would 3d point be more accurate from this pose? Should it be updated anyways?
                 # I feel like prob not since if its already stored it should be closer in index so feature matches are better...

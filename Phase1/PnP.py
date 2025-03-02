@@ -157,10 +157,9 @@ def reprojectionErrorPnP(X, x, K, R, C):
 
     return total_error / len(X)
 
-def PnPRANSAC(X3d, x2d, K, num_iter=1000, threshold=2.0):
+def PnPRANSAC(X3d, x2d, K, num_iter=5000, threshold=3.0):
     N = X3d.shape[0]
-    I = np.identity(3)
-    print("N",N)
+
     best_inliers = []
     best_R = None
     best_T = None

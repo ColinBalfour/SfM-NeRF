@@ -1,5 +1,72 @@
 import numpy as np
 
+def project_point_to_image(X, R, T, K):
+    """
+    Project a 3D point to image coordinates.
+
+    Parameters:
+    X: 3D point (3,) or (3,1)
+    R: Rotation matrix (3,3)
+    T: Translation vector (3,1)
+    K: Camera intrinsic matrix (3,3)
+
+    Returns:
+    x, y: image coordinates
+    """
+    # Ensure X is shape (3,)
+    X = X.flatten()[:3]
+
+    # Make homogeneous 3D point
+    X_homo = np.append(X, 1)
+
+    # Construct projection matrix
+    P = np.dot(K, np.hstack((R, T)))
+
+    # Project point
+    x_proj_homo = np.dot(P, X_homo)
+
+    # Convert from homogeneous to image coordinates
+    x_proj = x_proj_homo[:2] / x_proj_homo[2]
+
+    return x_proj[0], x_proj[1]
+
+
+def projectedpointframe(R, T, R_final, C_final, K, X_final):
+    """
+    Project points to two camera frames.
+
+    Parameters:
+    R: Rotation matrix of first camera
+    T: Translation vector of first camera
+    R_final: Rotation matrix of second camera
+    C_final: Camera center of second camera
+    K: Camera intrinsic matrix
+    X_final: 3D points to project
+
+    Returns:
+    projected_pts_frame1: Points projected to first frame
+    projected_pts_frame2: Points projected to second frame
+    """
+    # Projecting points back to images after linear triangulation
+    # For frame 1 (reference frame)
+    R1 = R
+    T1 = T
+    T2 = -np.dot(R_final, C_final.reshape(3, 1))
+
+    # frame 1
+    projected_pts_frame1 = []
+    for point in X_final:
+        x, y = project_point_to_image(point, R1, T1, K)
+        projected_pts_frame1.append((x, y))
+
+    # For frame 2
+    projected_pts_frame2 = []
+    for point in X_final:
+        x, y = project_point_to_image(point, R_final, T2, K)
+        projected_pts_frame2.append((x, y))
+
+    return np.array(projected_pts_frame1), np.array(projected_pts_frame2)
+
 def mean_reprojection_error(fpts1, fpts2, X_final, R, T, R_final, C_final, K):
     # Reprojection error after linear triangulation
     total_error_1 = []  # frame 1

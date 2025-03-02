@@ -68,9 +68,9 @@ def reject_outliers(kp1, kp2, dmatches, N=50000, threshold=.0005, normalize=True
     # Get with OpenCV
     cvF, _ = cv2.findFundamentalMat(pts1, pts2, cv2.FM_RANSAC)
 
-    print("opencv:")
-    print(cvF)
-    print(np.linalg.matrix_rank(cvF))
+    # print("opencv:")
+    # print(cvF)
+    # print(np.linalg.matrix_rank(cvF))
     
     if normalize:
     
