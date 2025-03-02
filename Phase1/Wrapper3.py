@@ -690,8 +690,6 @@ def main():
     C, R, X12 = triangulate(K, camera_info[1]['R'], camera_info[1]['C'], img1, img2, kp1, kp2, dmatches, show=True)
     camera_info[2] = {'R': R, 'C': C}
     
-    all_world_points = X12
-    
     fIdx_to_3D = {}
     for idx, match in enumerate(matches):
         # match is (u1, v1, u2, v2, f_idx)
@@ -726,6 +724,8 @@ def main():
         obj_points = np.array(obj_points, dtype=np.float32).reshape(-1, 3)
         img_points = np.array(img_points, dtype=np.float32).reshape(-1, 2)
         
+        # NOTE: get_pose will filter out (RANSAC) certain object points and image points, but *we don't use that*
+        # This should probably output the filtered points and we should remove the outliers, but we don't do that here 
         C, R = get_pose(i, obj_points, img_points, K)
         # Store camera pose
         camera_info[i] = {'R': R, 'C': C}
@@ -750,8 +750,6 @@ def main():
             R1 = camera_info[j]['R']
             _, _, Xnew = triangulate(K, R1, C1, img1, img2, kp1, kp2, dmatches, show=False)
             
-            # Store the new 3D points
-            all_world_points = np.vstack((all_world_points, Xnew))
             
             # Each row in Xnew corresponds to matches[idx], which is (u_j,v_j, u_i,v_i, f_idx)
             for idx2, match in enumerate(matches):
@@ -764,9 +762,11 @@ def main():
                 if f_idx not in fIdx_to_3D:
                     fIdx_to_3D[f_idx] = Xnew[idx2]
             
+            
         print(f'Registered Camera: {i + 1}')
         
     # Visualize the complete 3D reconstruction
+    all_world_points = fIdx_to_3D.values()
     visualize_reconstruction(all_world_points, camera_info.items())
     
     # Create a 2D top-down view (X-Z plane)
