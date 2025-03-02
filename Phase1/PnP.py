@@ -129,6 +129,33 @@ def LinearPnP(X3d,x2d,K):
 #
 #     return R, t, C, t_scale
 
+def reprojectionErrorPnP(X, x, K, R, C):
+    """
+    Calculate reprojection error for PnP.
+
+    Parameters:
+    X: 3D points (N x 3)
+    x: 2D points (N x 2)
+    K: Camera intrinsic matrix (3 x 3)
+    R: Rotation matrix (3 x 3)
+    C: Camera center (3 x 1)
+
+    Returns:
+    Mean reprojection error in pixels
+    """
+    # Convert camera center to translation vector
+    T = -np.dot(R, C.reshape(3, 1))
+
+    # Project 3D points to image
+    total_error = 0
+    for i in range(len(X)):
+        X_i = X[i]
+        x_i = x[i]
+        proj_x, proj_y = project_point_to_image(X_i, R, T, K)
+        error = np.sqrt((proj_x - x_i[0]) ** 2 + (proj_y - x_i[1]) ** 2)
+        total_error += error
+
+    return total_error / len(X)
 
 def PnPRANSAC(X3d, x2d, K, num_iter=1000, threshold=2.0):
     N = X3d.shape[0]

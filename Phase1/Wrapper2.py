@@ -512,14 +512,17 @@ def main():
             'im': images[0],
             'R': np.identity(3),
             'T': np.zeros((3, 1)),
-            'x': None
+            'x': None,
+            'X': None
         }
     ]
     
     world_points = None
-    for i in range(len(images)-2):
-        # Load matching data for image1 from matching1.txt
-        matching_file = os.path.join(path2, f"matching{i+1}.txt")
+    # Load matching data for image1 from matching1.txt
+    
+    all_matches = {}
+    for i in range(len(images)):
+        matching_file = os.path.join(path2, f"matching1.txt")
 
         try:
             _, matches = parse_matching_file(matching_file)
@@ -528,23 +531,50 @@ def main():
             return
 
         # For demonstration, we display matches between image 1 and image 2.
-        target_img_id = i+1
+        target_img_id = 1
         kp1, kp2, dmatches = get_keypoints_and_matches_for_pair(matches, target_img_id+1)
-        print(f"Found {len(kp1)} matches between image 1 and image {target_img_id}")
+        print(f"Found {len(kp1)} matches between image 1 and image {target_img_id+1}")
 
         # Display the matches using cv2.drawMatches
-        display_matches(images[i], images[target_img_id], kp1, kp2, dmatches)
+        # display_matches(images[0], images[target_img_id], kp1, kp2, dmatches)
+    
+    # Triangulate points
+    C_final, R_final, X_final, fpts1, fpts2 = triangulate(K, image_data[0]['R'], image_data[0]['T'], images[0], images[target_img_id], kp1, kp2, dmatches)
+    
+    image_data[0]['x'] = fpts1
+    image_data[0]['X'] = X_final
+    image_data.append({
+        'im': images[target_img_id],
+        'R': R_final,
+        'T': C_final,
+        'x': fpts2,
+        'X': X_final
+    })
+    
+    world_points = X_final
+    
+    for i in range(2, len(images)):
+
+        target_img_id = i 
+        kp1, kp3, dmatches = get_keypoints_and_matches_for_pair(matches, target_img_id+1)
+        print(f"Found {len(kp1)} matches between image 1 and image {target_img_id+1}")
+
+        # Display the matches using cv2.drawMatches
+        display_matches(images[0], images[target_img_id], kp1, kp3, dmatches)
         
-        # Triangulate points
-        C_final, R_final, X_final, fpts1, fpts2 = triangulate(K, image_data[i]['R'], image_data[i]['T'], images[i], images[target_img_id], kp1, kp2, dmatches)
-        
-        image_data[i]['x'] = fpts1
+        # get pose
+        C_final, R_final, X_final, xid = get_pose_and_new_points(K, images[0], images[target_img_id], kp1, kp3, dmatches, image_data[0]['x'], image_data[0]['X'])
+
         image_data.append({
             'im': images[target_img_id],
             'R': R_final,
             'T': C_final,
-            'x': fpts2
+            'x': fpts2,
+            'X': X_final
         })
+        
+        
+        
         
         
             

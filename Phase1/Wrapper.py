@@ -225,35 +225,6 @@ def projectedpointframe(R, T, R_final, C_final, K, X_final):
     return np.array(projected_pts_frame1), np.array(projected_pts_frame2)
 
 
-def reprojectionErrorPnP(X, x, K, R, C):
-    """
-    Calculate reprojection error for PnP.
-
-    Parameters:
-    X: 3D points (N x 3)
-    x: 2D points (N x 2)
-    K: Camera intrinsic matrix (3 x 3)
-    R: Rotation matrix (3 x 3)
-    C: Camera center (3 x 1)
-
-    Returns:
-    Mean reprojection error in pixels
-    """
-    # Convert camera center to translation vector
-    T = -np.dot(R, C.reshape(3, 1))
-
-    # Project 3D points to image
-    total_error = 0
-    for i in range(len(X)):
-        X_i = X[i]
-        x_i = x[i]
-        proj_x, proj_y = project_point_to_image(X_i, R, T, K)
-        error = np.sqrt((proj_x - x_i[0]) ** 2 + (proj_y - x_i[1]) ** 2)
-        total_error += error
-
-    return total_error / len(X)
-
-
 def get_feature_position_in_image(feature_idx, matches, image_id):
     """
     Get the 2D position of a feature in a specific image.
@@ -420,7 +391,7 @@ def main():
     except Exception as e:
         print(f"Error parsing matching file: {e}")
         return
-
+    
     # Create structures to store 3D points and track which ones have been reconstructed
     X_all = np.zeros((n_features, 3))  # 3D point coordinates
     X_found = np.zeros((n_features, 1), dtype=int)  # Binary flag if point has been triangulated
@@ -671,7 +642,7 @@ def main():
 
         if len(X_3d) < 8:
             print(f"Not enough correspondences for PnP with image {i + 1}")
-        continue
+            continue
 
         # PnP to estimate camera pose
         try:
