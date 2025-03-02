@@ -138,7 +138,6 @@ def reject_outliers(kp1, kp2, dmatches, N=50000, threshold=.0005, normalize=True
     
     return recomputed_F, best_inliers
 
-
 def get_essential_mtx(K, F):
     """
     Compute the essential matrix from the fundamental matrix and camera intrinsics.
@@ -146,7 +145,6 @@ def get_essential_mtx(K, F):
 
     E = K.T @ F @ K
     return E
-
 
 def get_camera_pose(E):
     U, D, Vt = np.linalg.svd(E)

@@ -367,3 +367,34 @@ def non_linear_triangulation(K, R1, T1, R2, T2, finalpts1, finalpts2, X):
 #         error.append(point_error)
 #
 #     return
+
+
+def chirality_condition(triangulated_points, pose):
+    
+    # Now check which pose gives the most points in front of both cameras
+    best_pose_idx = 0
+    max_valid_points = 0
+
+    for i, (points, (C, R)) in enumerate(zip(triangulated_points, pose)):
+        # Check cheirality condition
+        valid_points = 0
+        for pt in points:
+            z1 = pt[2]
+            if z1 > 0:
+                # Check if point is in front of second camera
+                r3 = R[2, :]
+                v = pt - C.reshape(3)
+                if np.dot(r3, v) > 0:
+                    valid_points += 1
+        print(f"Pose {i + 1}: {valid_points} valid points")
+        if valid_points > max_valid_points:
+            max_valid_points = valid_points
+            best_pose_idx = i
+            print(f"Best pose: {best_pose_idx}")
+
+    # Get the best pose and points
+    X_final = np.array(triangulated_points[best_pose_idx])
+    C_final = pose[best_pose_idx][0].reshape(3,1)
+    R_final = pose[best_pose_idx][1]
+
+    return X_final, C_final, R_final
