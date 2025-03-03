@@ -206,7 +206,7 @@ def get_keypoints_and_matches_for_pair(matches):
 
     for feature in matches:
         pt1 = feature[:2]
-        pt2 = feature[2:]
+        pt2 = feature[2:4]
         # Create KeyPoint objects (using an arbitrary size, e.g., 5)
         keypoint1 = cv2.KeyPoint(x=pt1[0], y=pt1[1], size=5)
         keypoint2 = cv2.KeyPoint(x=pt2[0], y=pt2[1], size=5)
@@ -248,6 +248,8 @@ def refine_all_matches(matches_dict,
     # We'll iterate over each pair in matches_dict
     for (i, j), match_list in matches_dict.items():
         
+        print(f"Refining matches for pair ({i}, {j})...")
+        
         # 1) Apply the outlier rejection
         # Apply outlier rejection
         arr = np.array(match_list)
@@ -258,7 +260,7 @@ def refine_all_matches(matches_dict,
         refined_list = arr[inliers] 
         
         # 2) Store the refined list in a new dictionary
-        refined_matches_dict[(i, j)] = refined_list
+        refined_matches_dict[(i, j)] = F, refined_list
         
         # 3) Find the matches that were deemed outliers
         mask = ~np.isin(arr, refined_list).all(axis=1)
@@ -391,7 +393,7 @@ def visualize_reconstruction(X_all, camera_info):
     plt.show()
     
 
-def triangulate(K, R1, T1, im1, im2, kp1, kp2, dmatches, show=False):
+def triangulate(K, F, R1, T1, im1, im2, kp1, kp2, dmatches, show=False):
     """
     Given two images and their matches, estimate the camera pose and triangulated points.
 
@@ -409,7 +411,11 @@ def triangulate(K, R1, T1, im1, im2, kp1, kp2, dmatches, show=False):
     
     fpts1 = np.array([kp1[m.queryIdx].pt for m in dmatches])
     fpts2 = np.array([kp2[m.trainIdx].pt for m in dmatches])
-    F = estimate_fundamental_matrix(fpts1, fpts2)
+    # F = estimate_fundamental_matrix(fpts1, fpts2)
+    
+    # print("ahhh")
+    # print(F)
+    # raise Exception
 
     if show:
         print("Estimated fundamental matrix F:")
@@ -423,6 +429,7 @@ def triangulate(K, R1, T1, im1, im2, kp1, kp2, dmatches, show=False):
     pose = get_camera_pose(E)
     if show:
         print(f"Camera pose {pose}")
+        
 
     # For each possible pose
     triangulated_points = []
@@ -437,6 +444,7 @@ def triangulate(K, R1, T1, im1, im2, kp1, kp2, dmatches, show=False):
         triangulated_points.append(points_3d)
 
     X_final, C_final, R_final = chirality_condition(triangulated_points, pose)
+    
     # print("triangulated points:", triangulated_points)
     print("length of triangulated points:", len(triangulated_points))
     
@@ -631,9 +639,10 @@ def main():
     # Get the first two images and their matches
     img1 = images[0]
     img2 = images[1]
-    matches = refined_matches[(1, 2)]
+    F12, matches = refined_matches[(1, 2)]
     
     kp1, kp2, dmatches = get_keypoints_and_matches_for_pair(matches)
+    display_matches(img1, img2, kp1, kp2, dmatches)
     # Triangulate
     camera_info = {
         1: {
@@ -641,7 +650,7 @@ def main():
             'C': np.zeros((3, 1)),
         }
     }
-    C, R, X12 = triangulate(K, camera_info[1]['R'], camera_info[1]['C'], img1, img2, kp1, kp2, dmatches, show=True)
+    C, R, X12 = triangulate(K, F12, camera_info[1]['R'], camera_info[1]['C'], img1, img2, kp1, kp2, dmatches, show=True)
     camera_info[2] = {'R': R, 'C': C}
     
     fIdx_to_3D = {}
@@ -701,7 +710,7 @@ def main():
                 print(f"No matches for pair {pair_key}. Skipping.")
                 continue
             
-            matches = refined_matches[pair_key]
+            F, matches = refined_matches[pair_key]
             kp1, kp2, dmatches = get_keypoints_and_matches_for_pair(matches)
             
             # Triangulate
@@ -710,7 +719,7 @@ def main():
             if C1 is None or R1 is None:
                 print(f"  Could not find camera pose for image {j}. Skipping.")
                 continue
-            _, _, Xnew = triangulate(K, R1, C1, img1, img2, kp1, kp2, dmatches, show=False)
+            _, _, Xnew = triangulate(K, F, R1, C1, img1, img2, kp1, kp2, dmatches, show=False)
             
             
             # Each row in Xnew corresponds to matches[idx], which is (u_j,v_j, u_i,v_i, f_idx)

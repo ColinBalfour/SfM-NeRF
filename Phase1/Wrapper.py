@@ -251,8 +251,8 @@ def visualize_3d_points(X_final, C_final, X_optimized=None,  title="3D Points Vi
 
 def main():
     # Set data folder and number of images
-    path = "D:/Computer vision/Homeworks/5. Project 2 - Phase1/YourDirectoryID_p2 (1)/YourDirectoryID_p2/Phase1/P2Data/P2Data"
-    #path = "Data"
+    # path = "D:/Computer vision/Homeworks/5. Project 2 - Phase1/YourDirectoryID_p2 (1)/YourDirectoryID_p2/Phase1/P2Data/P2Data"
+    path = "Data"
     num_imgs = 5
 
     # Load images (which are already undistorted and resized to 800x600px)
@@ -260,8 +260,8 @@ def main():
     if len(images) < 2:
         print("Need at least two images to match.")
         return
-    path2 = "D:/Computer vision/Homeworks/5. Project 2 - Phase1/YourDirectoryID_p2 (1)/YourDirectoryID_p2/Phase1/P2Data/P2Data"
-    #path2 = "Data"
+    # path2 = "D:/Computer vision/Homeworks/5. Project 2 - Phase1/YourDirectoryID_p2 (1)/YourDirectoryID_p2/Phase1/P2Data/P2Data"
+    path2 = "Data"
 
     # Load camera calibration parameters (intrinsic matrix K) if needed
     calib_file = os.path.join(path2, "calibration.txt")
@@ -295,6 +295,8 @@ def main():
 
     print("Estimated fundamental matrix F:")
     print(F)
+    
+    raise Exception
 
     # Display the inlier matches using cv2.drawMatches
     inlier_matches = [dmatches[i] for i in inliers]
@@ -353,8 +355,9 @@ def main():
     X_final = np.array(triangulated_points[best_pose_idx])
     C_final = pose[best_pose_idx][0].reshape(3,1)
     R_final = pose[best_pose_idx][1]
-    print("triangulated points:", triangulated_points)
+    # print("triangulated points:", triangulated_points)
     print("length of triangulated points:", len(triangulated_points))
+
 
    #  # Linear triangulation
    #  # Rotation and translation of base frame
