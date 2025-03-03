@@ -390,7 +390,8 @@ def chirality_condition(triangulated_points, pose):
         if valid_points > max_valid_points:
             max_valid_points = valid_points
             best_pose_idx = i
-            print(f"Best pose: {best_pose_idx}")
+    
+    print(f"Best pose: {best_pose_idx}")
 
     # Get the best pose and points
     X_final = np.array(triangulated_points[best_pose_idx])

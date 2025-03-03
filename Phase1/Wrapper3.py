@@ -3,6 +3,7 @@ import numpy as np
 import os
 import re
 import matplotlib.pyplot as plt
+import time
 
 from Utils import *
 from Fundamental import *
@@ -360,9 +361,11 @@ def visualize_reconstruction(X_all, camera_info):
                c='blue', marker='.', s=2, alpha=0.6)
 
     # Plot camera positions
-    for i, (C, R) in camera_info.items():
+    for i, info in camera_info.items():
+        C = info['C']
+        R = info['R']
         ax.scatter(C[0], C[1], C[2], color=f'C{i}', marker='s', s=100,
-                   label=f'Camera {i + 1}')
+                   label=f'Camera {i}')
 
     # Set labels and title
     ax.set_xlabel('X')
@@ -386,7 +389,6 @@ def visualize_reconstruction(X_all, camera_info):
     plt.tight_layout()
     plt.savefig('complete_reconstruction.png', dpi=300)
     plt.show()
-    
     
 
 def triangulate(K, R1, T1, im1, im2, kp1, kp2, dmatches, show=False):
@@ -429,6 +431,7 @@ def triangulate(K, R1, T1, im1, im2, kp1, kp2, dmatches, show=False):
         # Convert camera center to translation
         T2 = -np.dot(R, C.reshape(3, 1))
 
+        # print(R1, T1)
         # Triangulate points
         points_3d = triangulationlinear(K, R1, T1, R, T2, fpts1, fpts2)
         triangulated_points.append(points_3d)
@@ -575,21 +578,25 @@ def get_pose(i, obj_points, img_points, K):
         R_init, C_init, inliers_pnp = PnPRANSAC(obj_points, img_points, K)
 
         if len(inliers_pnp) < 6:
-            print(f"Not enough inliers for reliable PnP with image {i + 1}")
+            print(f"Not enough inliers for reliable PnP with image {i}")
             return None, None
 
         # Calculate reprojection error after linear PnP
         errorLinearPnP = reprojectionErrorPnP(obj_points[inliers_pnp], img_points[inliers_pnp], K, R_init, C_init)
 
         # Non-linear refinement of camera pose
-        Ri, Ci = NonlinearPnP(obj_points[inliers_pnp], img_points[inliers_pnp], K, R_init, C_init)
+        Ci, Ri = NonlinearPnP(obj_points[inliers_pnp], img_points[inliers_pnp], K, R_init, C_init)
+        # print(Ri, Ci)
         errorNonLinearPnP = reprojectionErrorPnP(obj_points[inliers_pnp], img_points[inliers_pnp], K, Ri, Ci)
         print(f"Error after linear PnP: {errorLinearPnP}, Error after non-linear PnP: {errorNonLinearPnP}")
 
         
     except Exception as e:
-        print(f"Error in PnP for image {i + 1}: {e}")
+        print(f"Error in PnP for image {i}: {e}")
+        raise e
         return None, None
+    
+    return Ci, Ri
      
 
 
@@ -674,8 +681,13 @@ def main():
         # NOTE: get_pose will filter out (RANSAC) certain object points and image points, but *we don't use that*
         # This should probably output the filtered points and we should remove the outliers, but we don't do that here 
         C, R = get_pose(i, obj_points, img_points, K)
+        if C is None or R is None:
+            print(f"  Could not estimate camera pose for image {i}. Skipping.")
+            # time.sleep(2)
+            return
         # Store camera pose
         camera_info[i] = {'R': R, 'C': C}
+        
         
 
         # Now triangulate new points between this camera and all previous cameras
@@ -695,6 +707,9 @@ def main():
             # Triangulate
             C1 = camera_info[j]['C']
             R1 = camera_info[j]['R']
+            if C1 is None or R1 is None:
+                print(f"  Could not find camera pose for image {j}. Skipping.")
+                continue
             _, _, Xnew = triangulate(K, R1, C1, img1, img2, kp1, kp2, dmatches, show=False)
             
             
@@ -713,8 +728,8 @@ def main():
         print(f'Registered Camera: {i + 1}')
         
     # Visualize the complete 3D reconstruction
-    all_world_points = fIdx_to_3D.values()
-    visualize_reconstruction(all_world_points, camera_info.items())
+    all_world_points = np.array(list(fIdx_to_3D.values()))
+    visualize_reconstruction(all_world_points, camera_info)
     
     # Create a 2D top-down view (X-Z plane)
     plt.figure(figsize=(10, 10))
@@ -725,7 +740,9 @@ def main():
         plt.scatter(all_world_points[:, 0], all_world_points[:, 2], marker='.', linewidths=0.5, color='blue')
 
     # Plot camera positions
-    for i, (C, R) in camera_info.items():
+    for i, info in camera_info.items():
+        C = info['C']
+        R = info['R']
         plt.plot(C[0], C[2], marker='o', markersize=15, linestyle='None',
                  label=f'Camera {i + 1}')
 

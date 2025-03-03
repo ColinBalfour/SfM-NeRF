@@ -148,7 +148,7 @@ def get_essential_mtx(K, F):
 
 def get_camera_pose(E):
     U, D, Vt = np.linalg.svd(E)
-    print("D", D)
+    # print("D", D)
     W = np.array([
         [0, -1, 0],
         [1, 0, 0],
