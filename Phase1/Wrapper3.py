@@ -9,6 +9,7 @@ from Utils import *
 from Fundamental import *
 from Triangulation import *
 from PnP import *
+from BundleAdjustment import *
 
 def load_calibration(calib_file):
     """
@@ -750,7 +751,108 @@ def main():
                     fIdx_to_3D[f_idx] = Xnew[idx2]
             
             
-        print(f'Registered Camera: {i + 1}')
+        print(f'Registered Camera: {i}')
+        
+    # Visualize the complete 3D reconstruction
+    all_world_points = np.array(list(fIdx_to_3D.values()))
+    visualize_reconstruction(all_world_points, camera_info)
+    
+    # Create a 2D top-down view (X-Z plane)
+    plt.figure(figsize=(10, 10))
+    plt.xlim(-10, 10)
+    plt.ylim(-10, 10)
+
+    if len(all_world_points) > 0:
+        plt.scatter(all_world_points[:, 0], all_world_points[:, 2], marker='.', linewidths=0.5, color='blue')
+
+    # Plot camera positions
+    for i, info in camera_info.items():
+        C = info['C']
+        R = info['R']
+        plt.plot(C[0], C[2], marker='o', markersize=15, linestyle='None',
+                 label=f'Camera {i}')
+
+    plt.grid(True)
+    plt.xlabel('X')
+    plt.ylabel('Z')
+    plt.title('Top-down View (X-Z Plane)')
+    plt.legend()
+    plt.savefig('topdown_view.png')
+    plt.show()
+    
+    plt.close()
+
+    print("Bundle adjustment...")
+    
+    
+        
+    # Suppose you have N cameras, M points
+    N = len(camera_info)    # e.g. cameras labeled 1..N, gather them in sorted order
+    M = len(all_feature_points)  # total features
+
+    # 1) Build camera_params_init (N x 6) and points_3d_init (M x 3)
+    camera_params_init = np.zeros((N, 6), dtype=np.float32)
+    points_3d_init = np.zeros((M, 3), dtype=np.float32)
+    points_2d = np.full((N, M, 2), -1, dtype=np.float32)  # or something similar
+    print(points_2d.shape)
+
+    # 'camera_ids' is a sorted list of the cameras in your pipeline
+    camera_ids = sorted(list(camera_info.keys()))  # e.g. [1,2,3,...]
+
+    # Fill camera_params_init
+    for i, cam_id in enumerate(camera_ids):
+        R = camera_info[cam_id]['R']
+        C = camera_info[cam_id]['C']  # camera center in world coords
+        rvec, _ = cv2.Rodrigues(R)
+        tvec = -R @ C  # world->camera
+        camera_params_init[i, :3] = rvec.ravel()
+        camera_params_init[i, 3:] = tvec.ravel()
+
+    # Fill points_3d_init and points_2d, plus build a visibility matrix
+    # e.g. if fIdx_to_3D[f] = [X, Y, Z], fill points_3d_init[f, :] = ...
+    # And if feature f is in camera camera_ids[i], fill points_2d[i, f] = (u,v)
+
+    visibility_matrix = np.zeros((N, M), dtype=np.uint8)
+
+    for f_idx, feature_dict in enumerate(all_feature_points):
+        # Suppose we have points_3d_init[f_idx] from fIdx_to_3D
+        if f_idx in fIdx_to_3D:
+            points_3d_init[f_idx] = fIdx_to_3D[f_idx]
+        
+        for cam_id, observation in feature_dict.items():
+            if cam_id in camera_ids:
+                i = camera_ids.index(cam_id)
+                u, v = observation[0], observation[1]
+                points_2d[i, f_idx] = (u, v)
+                visibility_matrix[i, f_idx] = 1
+
+    # 2) Call bundle adjustment
+    cam_params_opt, points_3d_opt, cost, success = bundle_adjustment(
+        K,
+        camera_params_init,
+        points_3d_init,
+        points_2d,
+        visibility_matrix
+    )
+
+    if success:
+        print(f"Bundle adjustment converged. Final cost: {cost}")
+    else:
+        print("Bundle adjustment did not converge.")
+
+    # 3) Convert 'cam_params_opt' back to R, C
+    for i, cam_id in enumerate(camera_ids):
+        rvec_opt = cam_params_opt[i, :3]
+        tvec_opt = cam_params_opt[i, 3:]
+        R_opt, _ = cv2.Rodrigues(rvec_opt)
+        C_opt = -R_opt.T @ tvec_opt
+        camera_info[cam_id]['R'] = R_opt
+        camera_info[cam_id]['C'] = C_opt
+
+    # 4) Update your 3D points
+    for f_idx in range(M):
+        X, Y, Z = points_3d_opt[f_idx]
+        fIdx_to_3D[f_idx] = np.array([X, Y, Z])
         
     # Visualize the complete 3D reconstruction
     all_world_points = np.array(list(fIdx_to_3D.values()))
