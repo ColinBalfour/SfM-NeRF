@@ -296,7 +296,7 @@ def main():
     print("Estimated fundamental matrix F:")
     print(F)
     
-    raise Exception
+    # raise Exception
 
     # Display the inlier matches using cv2.drawMatches
     inlier_matches = [dmatches[i] for i in inliers]

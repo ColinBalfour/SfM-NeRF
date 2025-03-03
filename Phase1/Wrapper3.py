@@ -393,7 +393,7 @@ def visualize_reconstruction(X_all, camera_info):
     plt.show()
     
 
-def triangulate(K, F, R1, T1, im1, im2, kp1, kp2, dmatches, show=False):
+def triangulate(K, F, R1, T1, im1, im2, kp1, kp2, dmatches, show=False, useCV=False):
     """
     Given two images and their matches, estimate the camera pose and triangulated points.
 
@@ -445,8 +445,16 @@ def triangulate(K, F, R1, T1, im1, im2, kp1, kp2, dmatches, show=False):
 
     X_final, C_final, R_final = chirality_condition(triangulated_points, pose)
     
+    # if useCV:
+    #     _, R_cv, t_cv ,_ = cv2.recoverPose(E, fpts1, fpts2)
+    #     R_final = R_cv
+    #     C_final = t_cv.reshape(3,1)
+        
+    #     idx = np.argmin([np.linalg.norm(t_cv - C.reshape(3,1)) + np.linalg.norm(R_cv - R) for C, R in pose])
+    #     X_final = np.array(triangulated_points[idx])
+    
     # print("triangulated points:", triangulated_points)
-    print("length of triangulated points:", len(triangulated_points))
+    print("number of triangulated points:", len(X_final))
     
     colors = ['blue', 'green', 'red', 'orange']
     plt.figure(figsize=(10, 8))
@@ -483,7 +491,7 @@ def triangulate(K, F, R1, T1, im1, im2, kp1, kp2, dmatches, show=False):
         plt.show()
     else:
         plt.close()
-    
+        
     if show:
         _, R_cv, t_cv ,_ = cv2.recoverPose(E, fpts1, fpts2)
         print("R_cv:", R_cv)
@@ -577,6 +585,10 @@ def triangulate(K, F, R1, T1, im1, im2, kp1, kp2, dmatches, show=False):
     # Call this function after triangulation and optimization
     if show:
         visualize_3d_points(X_final, C_final, X_optimized)
+        
+    # if useCV:
+    #     ret, R, t, mask, points = cv2.recoverPose(E, fpts1, fpts2, K, 20, np.ones(len(fpts1)))
+    #     return t, R, points
     
     return C_final, R_final, X_optimized
 
@@ -653,6 +665,10 @@ def main():
     C, R, X12 = triangulate(K, F12, camera_info[1]['R'], camera_info[1]['C'], img1, img2, kp1, kp2, dmatches, show=True)
     camera_info[2] = {'R': R, 'C': C}
     
+    # print(len(matches))
+    # print(len(X12))
+    # raise Exception
+    
     fIdx_to_3D = {}
     for idx, match in enumerate(matches):
         # match is (u1, v1, u2, v2, f_idx)
@@ -666,7 +682,7 @@ def main():
         obj_points = []
         img_points = []
         
-        #NOTE: better way to do this might be take fIdx.keys() and take intersection with visibility_mask[i]
+        #NOTE: better (computationally) way to do this might be take fIdx.keys() and take intersection with visibility_mask[i]
         # but eh it works for now so
 
         # For each feature f_idx that we have from triangulation:
@@ -753,7 +769,7 @@ def main():
         C = info['C']
         R = info['R']
         plt.plot(C[0], C[2], marker='o', markersize=15, linestyle='None',
-                 label=f'Camera {i + 1}')
+                 label=f'Camera {i}')
 
     plt.grid(True)
     plt.xlabel('X')
