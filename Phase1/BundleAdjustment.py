@@ -148,7 +148,7 @@ def bundle_adjustment(
         fun,
         x0,
         method='trf',     # Levenberg–Marquardt (or 'trf' or 'dogbox')
-        max_nfev=50
+        max_nfev=10
     )
     
     # Unpack refined parameters
