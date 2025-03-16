@@ -179,12 +179,17 @@ def train(images, poses, camera_info, args):
         if len(models) == 0:
             print("No checkpoint found... continuing from scratch")
         else:
+            def get_idx(str):
+                return int(str.split("_")[-1].split(".")[0])
+            
+            models = sorted(models, key=get_idx)
+            
             print("Loading checkpoint...")
-            model.load_state_dict(torch.load(models[-1]))
-            model_pth = sorted(models)[-1]
+            model_pth = models[-1]
+            model.load_state_dict(torch.load(model_pth))
             print(f"Checkpoint {model_pth} loaded")
             
-            idx = int(model_pth.split("_")[-1].split(".")[0])
+            idx = get_idx(model_pth)
             print(f"Continue training from iteration {idx}")
             checkpoint_loaded = True
         
@@ -295,7 +300,7 @@ def test(images, poses, camera_info, args):
     pred_image = prediction.cpu().numpy().reshape(height, width, 3)
     
     image = (image * 255).astype(np.uint8)
-    pred_image = (pred_image * 255)#.astype(np.uint8)
+    pred_image = (pred_image * 255).astype(np.uint8)
     
     # display images
     print(max(image.flatten()), min(image.flatten()))
@@ -335,7 +340,7 @@ def configParser():
     parser.add_argument('--n_dirc_freq',default=4,help="number of positional encoding frequencies for viewing direction")
     parser.add_argument('--n_rays_batch',default=32*32*4,help="number of rays per batch")
     parser.add_argument('--n_sample',default=100,help="number of sample per ray")
-    parser.add_argument('--max_iters',default=10000,help="number of max iterations for training")
+    parser.add_argument('--max_iters',default=100000,help="number of max iterations for training")
     parser.add_argument('--logs_path',default="./logs/",help="logs path")
     parser.add_argument('--checkpoint_path',default="./Phase2/checkpoints/",help="checkpoints path")
     parser.add_argument('--load_checkpoint',default=True,help="whether to load checkpoint or not")
