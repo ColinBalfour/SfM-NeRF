@@ -173,4 +173,4 @@ cython_debug/
 nerf_synthetic
 logs
 # keep only "final_model" checkpoint
-*/checkpoints/model_*.pth 
+*/checkpoints*/model_*.pth 

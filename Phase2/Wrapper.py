@@ -230,6 +230,28 @@ def train(images, poses, camera_info, args):
                 writer.add_scalar('loss', loss_value.item(), i)
                 writer.add_scalar('avg_loss', sum(sum_loss) / len(sum_loss), i)
                 sum_loss = []
+                
+            if i % 1000 == 0:
+                # save images with tensorboard
+                model.eval()
+                for j in range(5):
+                    idx = random.randint(0, len(images) - 1)
+                    image = images[idx]
+                    pose = poses[idx]
+                    prediction, loss_value = test_image(model, image, pose, camera_info, args)
+                    
+                    image = torch.tensor(image)
+                    pred_image = prediction.cpu().reshape(camera_info['height'], camera_info['width'], 3)
+                    
+                    image = image.permute(2, 0, 1) # Convert HxWxC -> CxHxW
+                    pred_image = pred_image.permute(2, 0, 1)  # Convert HxWxC -> CxHxW
+                    
+                    writer.add_image(f'image_{j}', image, i)
+                    writer.add_image(f'pred_image_{j}', pred_image, i)
+                    writer.add_scalar(f'test_loss_{j}', loss_value, i)
+                    
+                model.train()
+                
 
             if i % args.save_ckpt_iter == 0:
                 torch.save(model.state_dict(), os.path.join(args.checkpoint_path, f"model_{i}.pth"))
@@ -272,6 +294,32 @@ def test(images, poses, camera_info, args):
     image = images[idx]
     pose = poses[idx]
     
+    prediction, loss_value = test_image(model, image, pose, camera_info, args)
+    
+    pred_image = prediction.cpu().numpy().reshape(height, width, 3)
+    
+    image = (image * 255).astype(np.uint8)
+    pred_image = (pred_image * 255).astype(np.uint8)
+    
+    # display images
+    plt.subplot(1, 2, 1)
+    plt.imshow(image)
+    plt.title("Ground Truth")
+    plt.axis('off')
+    
+    plt.subplot(1, 2, 2)
+    plt.imshow(pred_image)
+    plt.title("Prediction")
+    plt.axis('off')
+    plt.show()
+    
+    return
+
+def test_image(model, image, pose, camera_info, args):
+    
+    width = int(camera_info['width'])
+    height = int(camera_info['height'])
+    
     origins = []
     directions = []
     for y in range(height):
@@ -297,26 +345,8 @@ def test(images, poses, camera_info, args):
     # print(prediction.shape, image.shape) # (height * width, 3) (height, width, 3)
     loss_value = loss(torch.tensor(image.reshape(-1, 3)).to(device), prediction)
     
-    pred_image = prediction.cpu().numpy().reshape(height, width, 3)
+    return prediction, loss_value.item()
     
-    image = (image * 255).astype(np.uint8)
-    pred_image = (pred_image * 255).astype(np.uint8)
-    
-    # display images
-    print(max(image.flatten()), min(image.flatten()))
-    print(max(pred_image.flatten()), min(pred_image.flatten()))
-    plt.subplot(1, 2, 1)
-    plt.imshow(image)
-    plt.title("Ground Truth")
-    plt.axis('off')
-    
-    plt.subplot(1, 2, 2)
-    plt.imshow(pred_image)
-    plt.title("Prediction")
-    plt.axis('off')
-    plt.show()
-    
-    return
 
 def main(args):
     # load data
@@ -340,7 +370,7 @@ def configParser():
     parser.add_argument('--n_dirc_freq',default=4,help="number of positional encoding frequencies for viewing direction")
     parser.add_argument('--n_rays_batch',default=32*32*4,help="number of rays per batch")
     parser.add_argument('--n_sample',default=100,help="number of sample per ray")
-    parser.add_argument('--max_iters',default=100000,help="number of max iterations for training")
+    parser.add_argument('--max_iters',default=100001,help="number of max iterations for training")
     parser.add_argument('--logs_path',default="./logs/",help="logs path")
     parser.add_argument('--checkpoint_path',default="./Phase2/checkpoints/",help="checkpoints path")
     parser.add_argument('--load_checkpoint',default=True,help="whether to load checkpoint or not")
