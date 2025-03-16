@@ -168,12 +168,29 @@ def loss(groundtruth, prediction):
 def train(images, poses, camera_info, args):
     
     model = NeRFmodel(3, 3).to(device)
+    idx = 0
+    
+    if args.load_checkpoint:
+        models = glob.glob(os.path.join(args.checkpoint_path, "model_*.pth"))
+        if len(models) == 0:
+            print("No checkpoint found")
+            return
+        else:
+            print("Loading checkpoint...")
+            model.load_state_dict(torch.load(models[-1]))
+            model_pth = sorted(models)[-1]
+            print(f"Checkpoint {model_pth} loaded")
+            
+            idx = int(model_pth.split("_")[-1].split(".")[0])
+            print(f"Continue training from iteration {idx}")
+        
+    
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lrate)
     writer = SummaryWriter(args.logs_path)
     
     try:
     
-        for i in tqdm(range(args.max_iters)):
+        for i in tqdm(range(idx, args.max_iters)):
             rays = generateBatch(images, poses, camera_info, args)
             rays = torch.tensor(rays).to(device)
             
@@ -191,7 +208,7 @@ def train(images, poses, camera_info, args):
             
             if i % 100 == 0:
                 writer.add_scalar('loss', loss_value.item(), i)
-                
+
             if i % args.save_ckpt_iter == 0:
                 torch.save(model.state_dict(), os.path.join(args.checkpoint_path, f"model_{i}.pth"))
         
@@ -199,12 +216,79 @@ def train(images, poses, camera_info, args):
         print("Training interrupted, saving checkpoint...")
     finally:
         writer.close()
+        torch.save(model.state_dict(), os.path.join(args.checkpoint_path, f"model_{i}.pth"))
         torch.save(model.state_dict(), os.path.join(args.checkpoint_path, "final_model.pth"))
     
     return
 
 def test(images, poses, camera_info, args):
 
+    model = NeRFmodel(3, 3).to(device)
+    
+    if args.load_checkpoint:
+        model_pth = os.path.join(args.checkpoint_path, "final_model.pth")
+        if not os.path.exists(model_pth):
+            print("No final checkpoint found... loading latest checkpoint")
+        
+            models = glob.glob(os.path.join(args.checkpoint_path, "model_*.pth"))
+            if len(models) == 0:
+                print("No checkpoint found")
+                return
+            else:
+                print("Loading checkpoint...")
+                model_pth = sorted(models)[-1]
+
+        model.load_state_dict(torch.load(model_pth))
+        print(f"Checkpoint {model_pth} loaded")
+        
+    model.eval()
+    
+    width = int(camera_info['width'])
+    height = int(camera_info['height'])
+
+    idx = random.randint(0, len(images) - 1)
+    image = images[idx]
+    pose = poses[idx]
+    
+    origins = []
+    directions = []
+    for y in range(height):
+        for x in range(width):
+            origin, direction = PixelToRay(camera_info, pose, (x, y), args)
+            origins.append(origin)
+            directions.append(direction)
+    
+    origins = torch.tensor(np.array(origins, dtype=np.float32)).to(device)
+    directions = torch.tensor(np.array(directions, dtype=np.float32)).to(device)
+    
+    # print(origins.shape, directions.shape) # (big) process only a batch of rays at a time
+    
+    prediction = torch.zeros((height * width, 3)).to(device)
+    with torch.no_grad():
+        for i in tqdm(range(0, origins.shape[0], args.n_rays_batch)):
+            batch_origins = origins[i:i+args.n_rays_batch]
+            batch_directions = directions[i:i+args.n_rays_batch]
+            
+            pred = render(model, batch_origins, batch_directions, args)
+            prediction[i:i+args.n_rays_batch] = pred
+    
+    # print(prediction.shape, image.shape) # (height * width, 3) (height, width, 3)
+    loss_value = loss(torch.tensor(image.reshape(-1, 3)).to(device), prediction)
+    
+    pred_image = prediction.cpu().numpy().reshape(height, width, 3)
+    
+    # display images
+    plt.subplot(1, 2, 1)
+    plt.imshow(image)
+    plt.title("Ground Truth")
+    plt.axis('off')
+    
+    plt.subplot(1, 2, 2)
+    plt.imshow(pred_image)
+    plt.title("Prediction")
+    plt.axis('off')
+    plt.show()
+    
     return
 
 def main(args):
@@ -228,7 +312,7 @@ def configParser():
     parser.add_argument('--n_pos_freq',default=10,help="number of positional encoding frequencies for position")
     parser.add_argument('--n_dirc_freq',default=4,help="number of positional encoding frequencies for viewing direction")
     parser.add_argument('--n_rays_batch',default=32*32*4,help="number of rays per batch")
-    parser.add_argument('--n_sample',default=50,help="number of sample per ray")
+    parser.add_argument('--n_sample',default=100,help="number of sample per ray")
     parser.add_argument('--max_iters',default=10000,help="number of max iterations for training")
     parser.add_argument('--logs_path',default="./logs/",help="logs path")
     parser.add_argument('--checkpoint_path',default="./Phase2/checkpoints/",help="checkpoints path")
