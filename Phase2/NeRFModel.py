@@ -51,6 +51,8 @@ class NeRFmodel(nn.Module):
         #############################
         # Implement position encoding here
         #############################
+        
+        
 
         return 
 

@@ -124,7 +124,7 @@ def generateBatch(images, poses, camera_info, args):
     return np.array(rays, dtype=np.float32)
         
 
-def render(model, rays_origin, rays_direction, args, near=1.0, far=10.0):
+def render(model, rays_origin, rays_direction, args, near=2.0, far=6.0):
     """
     Input:
         model: NeRF model
@@ -136,9 +136,9 @@ def render(model, rays_origin, rays_direction, args, near=1.0, far=10.0):
     # print(rays_direction.shape, rays_origin.shape) # (N, 3) (N, 3)
     
     # sample points along ray
-    t_vals = torch.linspace(0, 1, args.n_sample)
-    t_vals = near + (far - near) * t_vals
-    t_vals = t_vals.unsqueeze(0).repeat(rays_origin.shape[0], 1).to(device)
+    # first, split into N bins, then uniformly randomly sample points in each bin to get t_vals
+    idx = torch.arange(0, args.n_sample).to(device)
+    t_vals = near + (far - near) * (idx + torch.rand(rays_origin.shape[0], args.n_sample).to(device)) / args.n_sample
     
     # get the delta for every sample
     delta_t = t_vals[:, 1:] - t_vals[:, :-1]
@@ -351,7 +351,9 @@ def test_image(model, image, pose, camera_info, args):
 def main(args):
     # load data
     print("Loading data...")
-    images, poses, camera_info = loadDataset(args.data_path, args.mode)
+    mode = args.mode
+    # mode = 'train'
+    images, poses, camera_info = loadDataset(args.data_path, mode)
 
     if args.mode == 'train':
         print("Start training")
@@ -369,7 +371,7 @@ def configParser():
     parser.add_argument('--n_pos_freq',default=10,help="number of positional encoding frequencies for position")
     parser.add_argument('--n_dirc_freq',default=4,help="number of positional encoding frequencies for viewing direction")
     parser.add_argument('--n_rays_batch',default=32*32*4,help="number of rays per batch")
-    parser.add_argument('--n_sample',default=100,help="number of sample per ray")
+    parser.add_argument('--n_sample',default=128,help="number of sample per ray")
     parser.add_argument('--max_iters',default=100001,help="number of max iterations for training")
     parser.add_argument('--logs_path',default="./logs/",help="logs path")
     parser.add_argument('--checkpoint_path',default="./Phase2/checkpoints/",help="checkpoints path")
