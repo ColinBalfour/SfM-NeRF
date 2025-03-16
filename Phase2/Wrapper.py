@@ -8,13 +8,14 @@ import torch
 import matplotlib.pyplot as plt
 import os
 import json
+import cv2
 
 from NeRFModel import *
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 np.random.seed(0)
 
-def loadDataset(data_path, mode):
+def  loadDataset(data_path, mode):
     """
     Input:
         data_path: dataset path
@@ -38,10 +39,13 @@ def loadDataset(data_path, mode):
     
     for frame in frames:
         file_path = os.path.join(data_path, frame['file_path'] + ".png")
-        img = imageio.imread(file_path)
+        # img = imageio.imread(file_path)
+        img = cv2.imread(file_path, cv2.IMREAD_UNCHANGED)
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        img = img / 255.0
         if img.shape[-1] == 4:
             img = img[..., :3]
-            
+        
         images.append(img)
         poses.append(frame['transform_matrix'])
         
@@ -56,8 +60,7 @@ def loadDataset(data_path, mode):
         'height': img.shape[0],
         'camera_matrix': mtx
     }
-        
-        
+
     return np.array(images), np.array(poses), camera_info
     
 
@@ -170,6 +173,7 @@ def train(images, poses, camera_info, args):
     model = NeRFmodel(3, 3).to(device)
     idx = 0
     
+    checkpoint_loaded = False
     if args.load_checkpoint:
         models = glob.glob(os.path.join(args.checkpoint_path, "model_*.pth"))
         if len(models) == 0:
@@ -182,20 +186,21 @@ def train(images, poses, camera_info, args):
             
             idx = int(model_pth.split("_")[-1].split(".")[0])
             print(f"Continue training from iteration {idx}")
+            checkpoint_loaded = True
         
     
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lrate)
     
-    latest_log = os.path.join(args.logs_path, "latest")
     logs = glob.glob(os.path.join("./logs", "*/"))
-    
     log_idx = 0
     if len(logs) > 0:
         # ['./logs/1/']
-        log_idx = max([int(log.split('/')[-2]) for log in logs]) + 1
+        log_idx = max([int(log.split('/')[-2]) for log in logs])
+        if not checkpoint_loaded:
+            log_idx += 1
     
     log_pth = os.path.join(args.logs_path, f"{log_idx}")
-    writer = SummaryWriter(args.logs_path)
+    writer = SummaryWriter(log_pth)
     
     try:
         sum_loss = []
@@ -218,7 +223,7 @@ def train(images, poses, camera_info, args):
             
             if i % 100 == 0:
                 writer.add_scalar('loss', loss_value.item(), i)
-                writer.add_scalar('avg_loss', sum_loss / len(sum_loss), i)
+                writer.add_scalar('avg_loss', sum(sum_loss) / len(sum_loss), i)
                 sum_loss = []
 
             if i % args.save_ckpt_iter == 0:
@@ -289,7 +294,12 @@ def test(images, poses, camera_info, args):
     
     pred_image = prediction.cpu().numpy().reshape(height, width, 3)
     
+    image = (image * 255).astype(np.uint8)
+    pred_image = (pred_image * 255)#.astype(np.uint8)
+    
     # display images
+    print(max(image.flatten()), min(image.flatten()))
+    print(max(pred_image.flatten()), min(pred_image.flatten()))
     plt.subplot(1, 2, 1)
     plt.imshow(image)
     plt.title("Ground Truth")

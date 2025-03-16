@@ -62,8 +62,8 @@ class NeRFmodel(nn.Module):
         out = self.fc1(pos)
         out = self.block1(out)
         
-        density = out[:, 0]
-        out = out[:, 1:]
+        density = out[:, :, 0].unsqueeze(-1)
+        out = out[:, :, 1:]
         
         # density = self.density_fc(out)
         # density = F.softplus(self.density_fc(out)) - 1e-2
