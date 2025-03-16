@@ -173,8 +173,7 @@ def train(images, poses, camera_info, args):
     if args.load_checkpoint:
         models = glob.glob(os.path.join(args.checkpoint_path, "model_*.pth"))
         if len(models) == 0:
-            print("No checkpoint found")
-            return
+            print("No checkpoint found... continuing from scratch")
         else:
             print("Loading checkpoint...")
             model.load_state_dict(torch.load(models[-1]))
@@ -186,10 +185,20 @@ def train(images, poses, camera_info, args):
         
     
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lrate)
+    
+    latest_log = os.path.join(args.logs_path, "latest")
+    logs = glob.glob(os.path.join("./logs", "*/"))
+    
+    log_idx = 0
+    if len(logs) > 0:
+        # ['./logs/1/']
+        log_idx = max([int(log.split('/')[-2]) for log in logs]) + 1
+    
+    log_pth = os.path.join(args.logs_path, f"{log_idx}")
     writer = SummaryWriter(args.logs_path)
     
     try:
-    
+        sum_loss = []
         for i in tqdm(range(idx, args.max_iters)):
             rays = generateBatch(images, poses, camera_info, args)
             rays = torch.tensor(rays).to(device)
@@ -201,6 +210,7 @@ def train(images, poses, camera_info, args):
             prediction = render(model, rays_origin, rays_direction, args)
             
             loss_value = loss(rays_rgb, prediction)
+            sum_loss.append(loss_value.item())
             
             optimizer.zero_grad()
             loss_value.backward()
@@ -208,6 +218,8 @@ def train(images, poses, camera_info, args):
             
             if i % 100 == 0:
                 writer.add_scalar('loss', loss_value.item(), i)
+                writer.add_scalar('avg_loss', sum_loss / len(sum_loss), i)
+                sum_loss = []
 
             if i % args.save_ckpt_iter == 0:
                 torch.save(model.state_dict(), os.path.join(args.checkpoint_path, f"model_{i}.pth"))

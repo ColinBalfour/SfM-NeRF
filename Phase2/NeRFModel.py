@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import numpy as np
 
 
@@ -31,13 +32,13 @@ class NeRFmodel(nn.Module):
             nn.ReLU(),
             nn.Linear(num_channels, num_channels), # 7
             nn.ReLU(),
-            nn.Linear(num_channels, num_channels), # 8
+            nn.Linear(num_channels, num_channels + 1), # 8
             nn.ReLU()
         )
         
         self.density_fc = nn.Linear(num_channels, 1)
         
-        self.features_fc = nn.Sequential(
+        self.rgb_fc = nn.Sequential(
             nn.Linear(num_channels + embed_direction_L, 128),
             nn.ReLU(),
             nn.Linear(128, 3),
@@ -60,9 +61,14 @@ class NeRFmodel(nn.Module):
         
         out = self.fc1(pos)
         out = self.block1(out)
-        density = self.density_fc(out)
+        
+        density = out[:, 0]
+        out = out[:, 1:]
+        
+        # density = self.density_fc(out)
+        # density = F.softplus(self.density_fc(out)) - 1e-2
         
         dir_input = torch.cat((out, direction), dim=-1)
-        rgb = self.features_fc(dir_input)
+        rgb = self.rgb_fc(dir_input)
 
         return density, rgb
