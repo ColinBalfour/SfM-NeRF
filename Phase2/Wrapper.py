@@ -191,9 +191,6 @@ def train(images, poses, camera_info, args):
     model = NeRFmodel().to(device)
     idx = 0
     
-    model_name = args.data_path.split("/")[-2]
-    args.checkpoint_path = os.path.join(args.checkpoint_path, model_name)
-    
     checkpoint_loaded = False
     if args.load_checkpoint:
         models = glob.glob(os.path.join(args.checkpoint_path, "model_*.pth"))
@@ -299,6 +296,7 @@ def test(images, poses, camera_info, args):
     
     if args.load_checkpoint:
         model_pth = os.path.join(args.checkpoint_path, "final_model.pth")
+        
         if not os.path.exists(model_pth):
             print("No final checkpoint found... loading latest checkpoint")
         
@@ -388,6 +386,9 @@ def main(args):
     args.max_iters = int(args.max_iters)
     args.n_pos_freq = int(args.n_pos_freq)
     args.n_dirc_freq = int(args.n_dirc_freq)
+    
+    model_name = args.data_path.split("/")[-2]
+    args.checkpoint_path = os.path.join(args.checkpoint_path, model_name)
 
     if args.mode == 'train':
         print("Start training")
