@@ -126,7 +126,7 @@ def generateBatch(images, poses, camera_info, args):
     return np.array(rays, dtype=np.float32)
         
 
-def render(model, rays_origin, rays_direction, args, near=2.0, far=6.0):
+def render(model, rays_origin, rays_direction, args, near=1.0, far=10.0):
     """
     Input:
         model: NeRF model
@@ -145,7 +145,7 @@ def render(model, rays_origin, rays_direction, args, near=2.0, far=6.0):
     # first, split into N bins, then uniformly randomly sample points in each bin to get t_vals
     
     # this impl is bad for some reason
-    idx = torch.arange(args.n_samples, dtype=torch.float32).unsqueeze(0).to(device)
+    idx = torch.arange(args.n_sample, dtype=torch.float32).unsqueeze(0).to(device)
     t_vals = near + (far - near) * (idx + torch.rand(rays_origin.shape[0], args.n_sample).to(device)) / args.n_sample
     
     # this impl is slow
@@ -191,11 +191,16 @@ def train(images, poses, camera_info, args):
     model = NeRFmodel().to(device)
     idx = 0
     
+    model_name = args.data_path.split("/")[-2]
+    args.checkpoint_path = os.path.join(args.checkpoint_path, model_name)
+    
     checkpoint_loaded = False
     if args.load_checkpoint:
         models = glob.glob(os.path.join(args.checkpoint_path, "model_*.pth"))
         if len(models) == 0:
             print("No checkpoint found... continuing from scratch")
+            if not os.path.exists(args.checkpoint_path):
+                os.makedirs(args.checkpoint_path)
         else:
             def get_idx(str):
                 return int(str.split("_")[-1].split(".")[0])
@@ -221,6 +226,9 @@ def train(images, poses, camera_info, args):
         log_idx = max([int(log.split('/')[-2]) for log in logs])
         if not checkpoint_loaded:
             log_idx += 1
+            
+    if args.log_id != "":
+        log_idx = args.log_id
     
     log_pth = os.path.join(args.logs_path, f"{log_idx}")
     writer = SummaryWriter(log_pth)
@@ -374,6 +382,12 @@ def main(args):
     mode = args.mode
     # mode = 'train'
     images, poses, camera_info = loadDataset(args.data_path, mode)
+    
+    args.n_rays_batch = int(args.n_rays_batch)
+    args.n_sample = int(args.n_sample)
+    args.max_iters = int(args.max_iters)
+    args.n_pos_freq = int(args.n_pos_freq)
+    args.n_dirc_freq = int(args.n_dirc_freq)
 
     if args.mode == 'train':
         print("Start training")
@@ -390,10 +404,11 @@ def configParser():
     parser.add_argument('--lrate',default=5e-4,help="training learning rate")
     parser.add_argument('--n_pos_freq',default=10,help="number of positional encoding frequencies for position")
     parser.add_argument('--n_dirc_freq',default=4,help="number of positional encoding frequencies for viewing direction")
-    parser.add_argument('--n_rays_batch',default=32*32*1,help="number of rays per batch")
-    parser.add_argument('--n_sample',default=400,help="number of sample per ray")
+    parser.add_argument('--n_rays_batch',default=32*32*8,help="number of rays per batch")
+    parser.add_argument('--n_sample',default=256,help="number of sample per ray")
     parser.add_argument('--max_iters',default=100001,help="number of max iterations for training")
     parser.add_argument('--logs_path',default="./logs/",help="logs path")
+    parser.add_argument('--log_id',default="",help="log id")
     parser.add_argument('--checkpoint_path',default="./Phase2/checkpoints/",help="checkpoints path")
     parser.add_argument('--load_checkpoint',default=True,help="whether to load checkpoint or not")
     parser.add_argument('--save_ckpt_iter',default=1000,help="num of iteration to save checkpoint")
