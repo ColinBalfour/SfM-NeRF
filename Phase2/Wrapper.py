@@ -96,6 +96,8 @@ def PixelToRay(camera_info, pose, pixelPosition, args):
     # get ray origin in world frame
     ray_origin = pose[:3, 3]
     
+    # print(ray_origin)
+    
     return ray_origin, ray_direction
 
 def generateBatch(images, poses, camera_info, args):
@@ -136,9 +138,25 @@ def render(model, rays_origin, rays_direction, args, near=2.0, far=6.0):
     # print(rays_direction.shape, rays_origin.shape) # (N, 3) (N, 3)
     
     # sample points along ray
+    # t_vals = torch.linspace(0, 1, args.n_sample)
+    # t_vals = near + (far - near) * t_vals
+    # t_vals = t_vals.unsqueeze(0).repeat(rays_origin.shape[0], 1).to(device)
+    
     # first, split into N bins, then uniformly randomly sample points in each bin to get t_vals
-    idx = torch.arange(0, args.n_sample).to(device)
+    
+    # this impl is bad for some reason
+    idx = torch.arange(args.n_samples, dtype=torch.float32).unsqueeze(0).to(device)
     t_vals = near + (far - near) * (idx + torch.rand(rays_origin.shape[0], args.n_sample).to(device)) / args.n_sample
+    
+    # this impl is slow
+    # t_vals = [] # (N, n_sample)
+    # for n in range(rays_origin.shape[0]):
+    #     tmp = []
+    #     for i in range(args.n_sample):
+    #         tmp.append(torch.uniform(near + i/args.n_sample * (far - near), near + (i+1)/args.n_sample * (far - near)))
+    #     t_vals.append(tmp)
+    # t_vals = torch.tensor(t_vals).to(device)
+    
     
     # get the delta for every sample
     delta_t = t_vals[:, 1:] - t_vals[:, :-1]
@@ -170,7 +188,7 @@ def loss(groundtruth, prediction):
 
 def train(images, poses, camera_info, args):
     
-    model = NeRFmodel(3, 3).to(device)
+    model = NeRFmodel().to(device)
     idx = 0
     
     checkpoint_loaded = False
@@ -206,6 +224,7 @@ def train(images, poses, camera_info, args):
     
     log_pth = os.path.join(args.logs_path, f"{log_idx}")
     writer = SummaryWriter(log_pth)
+    test_idx = [random.randint(0, len(images) - 1) for _ in range(5)]
     
     try:
         sum_loss = []
@@ -233,23 +252,24 @@ def train(images, poses, camera_info, args):
                 
             if i % 1000 == 0:
                 # save images with tensorboard
-                model.eval()
-                for j in range(5):
-                    idx = random.randint(0, len(images) - 1)
-                    image = images[idx]
-                    pose = poses[idx]
-                    prediction, loss_value = test_image(model, image, pose, camera_info, args)
-                    
-                    image = torch.tensor(image)
-                    pred_image = prediction.cpu().reshape(camera_info['height'], camera_info['width'], 3)
-                    
-                    image = image.permute(2, 0, 1) # Convert HxWxC -> CxHxW
-                    pred_image = pred_image.permute(2, 0, 1)  # Convert HxWxC -> CxHxW
-                    
-                    writer.add_image(f'image_{j}', image, i)
-                    writer.add_image(f'pred_image_{j}', pred_image, i)
-                    writer.add_scalar(f'test_loss_{j}', loss_value, i)
-                    
+                with torch.no_grad():
+                    model.eval()
+                    for j in range(5):
+                        idx = test_idx[j]
+                        image = images[idx]
+                        pose = poses[idx]
+                        prediction, loss_value = test_image(model, image, pose, camera_info, args)
+                        
+                        image = torch.tensor(image)
+                        pred_image = prediction.cpu().reshape(camera_info['height'], camera_info['width'], 3)
+                        
+                        image = image.permute(2, 0, 1) # Convert HxWxC -> CxHxW
+                        pred_image = pred_image.permute(2, 0, 1)  # Convert HxWxC -> CxHxW
+                        
+                        writer.add_image(f'gt_pred_image_{j}', torch.cat([image, pred_image], dim=2), i)
+                        writer.add_scalar(f'test_loss_{j}', loss_value, i)
+                
+                    torch.cuda.empty_cache()
                 model.train()
                 
 
@@ -267,7 +287,7 @@ def train(images, poses, camera_info, args):
 
 def test(images, poses, camera_info, args):
 
-    model = NeRFmodel(3, 3).to(device)
+    model = NeRFmodel().to(device)
     
     if args.load_checkpoint:
         model_pth = os.path.join(args.checkpoint_path, "final_model.pth")
@@ -370,8 +390,8 @@ def configParser():
     parser.add_argument('--lrate',default=5e-4,help="training learning rate")
     parser.add_argument('--n_pos_freq',default=10,help="number of positional encoding frequencies for position")
     parser.add_argument('--n_dirc_freq',default=4,help="number of positional encoding frequencies for viewing direction")
-    parser.add_argument('--n_rays_batch',default=32*32*4,help="number of rays per batch")
-    parser.add_argument('--n_sample',default=128,help="number of sample per ray")
+    parser.add_argument('--n_rays_batch',default=32*32*1,help="number of rays per batch")
+    parser.add_argument('--n_sample',default=400,help="number of sample per ray")
     parser.add_argument('--max_iters',default=100001,help="number of max iterations for training")
     parser.add_argument('--logs_path',default="./logs/",help="logs path")
     parser.add_argument('--checkpoint_path',default="./Phase2/checkpoints/",help="checkpoints path")
