@@ -176,4 +176,4 @@ turing_logs
 # keep only "final_model" checkpoint
 */checkpoints*/model_*.pth 
 */checkpoints/*/model_*.pth 
-
+*.png

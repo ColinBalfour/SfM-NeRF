@@ -783,7 +783,7 @@ def main(args):
 
 def configParser():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--data_path',default="D:/3. Computer vision/Homeworks/6. Project 2 - Phase 2/archive/nerf_synthetic/lego",help="dataset path")
+    parser.add_argument('--data_path',default="./Phase2/nerf_synthetic/lego/",help="dataset path")
     parser.add_argument('--mode',default='train',help="train/test/val")
     parser.add_argument('--lrate',default=5e-4,help="training learning rate")
     parser.add_argument('--n_pos_freq',default=10,help="number of positional encoding frequencies for position")
