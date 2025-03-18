@@ -802,7 +802,7 @@ def configParser():
     parser.add_argument('--logs_path',default="./logs/",help="logs path")
     parser.add_argument('--log_id',default="",help="log id")
     parser.add_argument('--exp_name', default="lego_experiment", help="experiment name for logging")
-    parser.add_argument('--checkpoint_path',default="./Phase2/checkpoints_new/",help="checkpoints path")
+    parser.add_argument('--checkpoint_path',default="./Phase2/checkpoints_new_2/",help="checkpoints path")
     parser.add_argument('--load_checkpoint',default=True,help="whether to load checkpoint or not")
     parser.add_argument('--save_ckpt_iter',default=1000,help="num of iteration to save checkpoint")
     parser.add_argument('--images_path', default="./image/",help="folder to store images")
