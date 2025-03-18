@@ -14,7 +14,7 @@ for img in imgs:
     frames.append(cv2.imread(img))
     
 # Save the frames as a GIF
-with imageio.get_writer('output.gif', mode='I', fps=2) as writer:
+with imageio.get_writer('image/output.gif', mode='I', fps=2) as writer:
     for image in frames:
         writer.append_data(image)
 writer.close()
