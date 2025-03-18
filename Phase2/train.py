@@ -197,6 +197,7 @@ def render(model, rays_origin, rays_direction, args, near=2.0, far=6.0):
     Returns:
         rgb: rendered colors, shape [N, 3]
     """
+
     device = rays_origin.device
     batch_size = rays_origin.shape[0]
 
@@ -252,10 +253,14 @@ def render(model, rays_origin, rays_direction, args, near=2.0, far=6.0):
     # Alpha is 1 - exp(-density * distance)
     alpha = 1.0 - torch.exp(-raw_density.squeeze(-1) * dists)
 
+
     # Transmittance (probability of light reaching the point)
+    # T = torch.ones_like(alpha)
+    # for i in range(1, args.n_sample):
+    #     T[:, i] = T[:, i - 1] * (1.0 - alpha[:, i - 1] + 1e-10)
     T = torch.ones_like(alpha)
-    for i in range(1, args.n_sample):
-        T[:, i] = T[:, i - 1] * (1.0 - alpha[:, i - 1] + 1e-10)
+    cumprod_term = torch.cumprod(1.0 - alpha + 1e-10, dim=1)
+    T[:, 1:] = cumprod_term[:, :-1]
 
     # Weights = alpha * T
     weights = alpha * T
@@ -381,6 +386,9 @@ def train(images, poses, camera_info, args):
         camera_info: camera parameters
         args: arguments
     """
+
+    torch.autograd.set_detect_anomaly(True)
+
     # Initialize model
     model = NeRFmodel(
         embed_pos_L=args.n_pos_freq,
@@ -790,11 +798,11 @@ def configParser():
     parser.add_argument('--n_dirc_freq',default=4,help="number of positional encoding frequencies for viewing direction")
     parser.add_argument('--n_rays_batch',default=32*32*8,help="number of rays per batch")
     parser.add_argument('--n_sample',default=256,help="number of sample per ray")
-    parser.add_argument('--max_iters',default=100001,help="number of max iterations for training")
+    parser.add_argument('--max_iters',default=200001,help="number of max iterations for training")
     parser.add_argument('--logs_path',default="./logs/",help="logs path")
     parser.add_argument('--log_id',default="",help="log id")
     parser.add_argument('--exp_name', default="lego_experiment", help="experiment name for logging")
-    parser.add_argument('--checkpoint_path',default="./Phase2/checkpoints/",help="checkpoints path")
+    parser.add_argument('--checkpoint_path',default="./Phase2/checkpoints_new/",help="checkpoints path")
     parser.add_argument('--load_checkpoint',default=True,help="whether to load checkpoint or not")
     parser.add_argument('--save_ckpt_iter',default=1000,help="num of iteration to save checkpoint")
     parser.add_argument('--images_path', default="./image/",help="folder to store images")
