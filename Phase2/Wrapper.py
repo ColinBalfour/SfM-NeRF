@@ -178,6 +178,8 @@ def render(model, rays_origin, rays_direction, args, near=1.0, far=10.0):
     # print(weights.shape) # (N, n_sample, 1)
         
     prediction = torch.sum(weights * rgbs, dim=1)
+    # total_weights = weights.sum(dim=[1, 2])
+    # prediction = prediction + (1 - total_weights).unsqueeze(-1)
     
     # print(prediction.device)
     
@@ -206,7 +208,7 @@ def train(images, poses, camera_info, args):
             
             print("Loading checkpoint...")
             model_pth = models[-1]
-            model.load_state_dict(torch.load(model_pth))
+            model.load_state_dict(torch.load(model_pth)['model_state_dict'])
             print(f"Checkpoint {model_pth} loaded")
             
             idx = get_idx(model_pth)
@@ -215,6 +217,7 @@ def train(images, poses, camera_info, args):
         
     
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lrate)
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1000, gamma=0.1)
     
     logs = glob.glob(os.path.join("./logs", "*/"))
     log_idx = 0
@@ -249,6 +252,7 @@ def train(images, poses, camera_info, args):
             optimizer.zero_grad()
             loss_value.backward()
             optimizer.step()
+            scheduler.step()
             
             if i % 100 == 0:
                 writer.add_scalar('loss', loss_value.item(), i)
@@ -308,7 +312,7 @@ def test(images, poses, camera_info, args):
                 print("Loading checkpoint...")
                 model_pth = sorted(models)[-1]
 
-        model.load_state_dict(torch.load(model_pth))
+        model.load_state_dict(torch.load(model_pth)['model_state_dict'])
         print(f"Checkpoint {model_pth} loaded")
         
     model.eval()
@@ -337,9 +341,10 @@ def test(images, poses, camera_info, args):
     plt.imshow(pred_image)
     plt.title("Prediction")
     plt.axis('off')
+    
+    plt.savefig(os.path.join(args.images_path, f"pred_{idx}.png"))
     plt.show()
     
-    return
 
 def test_image(model, image, pose, camera_info, args):
     
@@ -372,13 +377,140 @@ def test_image(model, image, pose, camera_info, args):
     loss_value = loss(torch.tensor(image.reshape(-1, 3)).to(device), prediction)
     
     return prediction, loss_value.item()
+
+def test_single_image(images, poses, camera_info, args):
+    """
+    Testing regime for the NeRF model on a single image.
+
+    Keyword Args:
+        tn: Near bound. (default: {2})
+        tf: Far bound. (default: {6})
+        samples: Number of samples per ray. (default: {192})
+        batch_size: Number of rays per batch. (default: {256})
+        H: Height of the image. (default: {400})
+        W: Width of the image. (default: {400})
+        log_dir: Directory to save logs. (default: {'trial_logs'})
+
+    Returns:
+        The rendered RGB colors for the input ray.
+    """
+    # Camera parameters
+    focal_length = camera_info['camera_matrix'][0][0]
+    H = camera_info['height']
+    W = camera_info['width']
     
+
+    model = NeRFmodel().to(device)
+    
+    if args.load_checkpoint:
+        model_pth = os.path.join(args.checkpoint_path, "final_model.pth")
+        
+        if not os.path.exists(model_pth):
+            print("No final checkpoint found... loading latest checkpoint")
+        
+            models = glob.glob(os.path.join(args.checkpoint_path, "model_*.pth"))
+            if len(models) == 0:
+                print("No checkpoint found")
+                return
+            else:
+                print("Loading checkpoint...")
+                model_pth = sorted(models)[-1]
+
+        model.load_state_dict(torch.load(model_pth)['model_state_dict'])
+        print(f"Checkpoint {model_pth} loaded")
+        
+    model.eval()
+    
+    pixel_values= []
+
+    # Plot rays
+    import matplotlib.pyplot as plt
+    def plot_rays(o, d, t):
+        fig = plt.figure(figsize=(12, 12))
+        ax = plt.axes(projection='3d')
+        # Label axes
+        ax.set_xlabel('X')
+        ax.set_ylabel('Y')
+        ax.set_zlabel('Z')
+
+        pt1 = o
+        pt2 = o + t * d
+
+        for p1, p2 in zip(pt1[::50], pt2[::50]):
+            ax.plot([p1[0], p2[0]], [p1[1], p2[1]], [p1[2], p2[2]])
+
+        plt.show()
+
+    trans_t = lambda t : np.array([
+        [1,0,0,0],
+        [0,1,0,0],
+        [0,0,1,t],
+        [0,0,0,1],
+    ], dtype=np.float32)
+
+    rot_phi = lambda phi : np.array([
+        [1,0,0,0],
+        [0,np.cos(phi),-np.sin(phi),0],
+        [0,np.sin(phi), np.cos(phi),0],
+        [0,0,0,1],
+    ], dtype=np.float32)
+
+    rot_theta = lambda th : np.array([
+        [np.cos(th),0,-np.sin(th),0],
+        [0,1,0,0],
+        [np.sin(th),0, np.cos(th),0],
+        [0,0,0,1],
+    ], dtype=np.float32)
+
+
+    def pose_spherical(theta, phi, radius):
+        c2w = trans_t(radius)
+        c2w = rot_phi(phi/180.*np.pi) @ c2w
+        c2w = rot_theta(theta/180.*np.pi) @ c2w
+        c2w = np.array([[-1,0,0,0],[0,0,1,0],[0,1,0,0],[0,0,0,1]]) @ c2w
+        return c2w
+
+    frames = []
+    count = 0
+    for th in tqdm(np.linspace(0., 360., 10, endpoint=False)):
+        count += 1
+        c2w = pose_spherical(th, -30., 4.)
+        
+        rays_origin = []
+        rays_direction = []
+        for y in range(H):
+            for x in range(W):
+                origin, direction = PixelToRay(camera_info, c2w, (x, y), args)
+                rays_origin.append(origin)
+                rays_direction.append(direction)
+        
+        rays_origin = np.array(rays_origin, dtype=np.float32)
+        rays_direction = np.array(rays_direction, dtype=np.float32)
+        all_rays = np.concatenate((rays_origin, rays_direction), axis=-1)
+
+        # Plot rays
+        plot_rays(rays_origin, rays_direction, 6)
+
+        pixel_values = []
+        for i in tqdm(range(0, len(all_rays), args.n_rays_batch)):
+            batch = all_rays[i:i+args.n_rays_batch]
+
+            rays_origin = torch.tensor(batch[:, :3]).to(device)
+            rays_direction = torch.tensor(batch[:, 3:6]).to(device)
+
+            predicted_pixel_values = render(model, rays_origin, rays_direction, args)
+            pixel_values.append(predicted_pixel_values.detach().cpu())
+
+        img = torch.cat(pixel_values).numpy().reshape(H, W, 3)*255.0
+        frames.append(img)
+        out_pth = os.path.join(args.images_path, f"image_{count}.png")
+        cv2.imwrite(out_pth, img)
 
 def main(args):
     # load data
     print("Loading data...")
     mode = args.mode
-    # mode = 'train'
+    mode = 'train'
     images, poses, camera_info = loadDataset(args.data_path, mode)
     
     args.n_rays_batch = int(args.n_rays_batch)
@@ -397,6 +529,11 @@ def main(args):
         print("Start testing")
         args.load_checkpoint = True
         test(images, poses, camera_info, args)
+
+    elif args.mode == 'gif':
+        print("Start gif")
+        args.load_checkpoint = True
+        test_single_image(images, poses, camera_info, args)
 
 def configParser():
     parser = argparse.ArgumentParser()
