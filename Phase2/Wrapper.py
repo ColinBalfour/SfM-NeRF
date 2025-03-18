@@ -208,7 +208,7 @@ def train(images, poses, camera_info, args):
             
             print("Loading checkpoint...")
             model_pth = models[-1]
-            model.load_state_dict(torch.load(model_pth))
+            model.load_state_dict(torch.load(model_pth)['model_state_dict'])
             print(f"Checkpoint {model_pth} loaded")
             
             idx = get_idx(model_pth)
@@ -312,7 +312,7 @@ def test(images, poses, camera_info, args):
                 print("Loading checkpoint...")
                 model_pth = sorted(models)[-1]
 
-        model.load_state_dict(torch.load(model_pth))
+        model.load_state_dict(torch.load(model_pth)['model_state_dict'])
         print(f"Checkpoint {model_pth} loaded")
         
     model.eval()
@@ -416,7 +416,7 @@ def test_single_image(images, poses, camera_info, args):
                 print("Loading checkpoint...")
                 model_pth = sorted(models)[-1]
 
-        model.load_state_dict(torch.load(model_pth))
+        model.load_state_dict(torch.load(model_pth)['model_state_dict'])
         print(f"Checkpoint {model_pth} loaded")
         
     model.eval()
@@ -503,13 +503,14 @@ def test_single_image(images, poses, camera_info, args):
 
         img = torch.cat(pixel_values).numpy().reshape(H, W, 3)*255.0
         frames.append(img)
-        cv2.imwrite(f"image_{count}.png", img)
+        out_pth = os.path.join(args.images_path, f"image_{count}.png")
+        cv2.imwrite(out_pth, img)
 
 def main(args):
     # load data
     print("Loading data...")
     mode = args.mode
-    # mode = 'train'
+    mode = 'train'
     images, poses, camera_info = loadDataset(args.data_path, mode)
     
     args.n_rays_batch = int(args.n_rays_batch)

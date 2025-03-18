@@ -2,7 +2,7 @@ import glob
 import cv2
 import imageio
 
-imgs = glob.glob("*.png")
+imgs = glob.glob("image/*.png")
 
 # Sort the images by filename
 imgs.sort(key=lambda x: int(x.split('_')[1].split('.')[0]))
