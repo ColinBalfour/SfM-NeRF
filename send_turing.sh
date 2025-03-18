@@ -16,4 +16,4 @@ module load cuda          #
 
 source .venv/bin/activate
 
-python3 Phase2/Wrapper.py --data_path ./Phase2/nerf_synthetic/lego/ --n_rays_batch 16384 --log_id 1      #
+python3 Phase2/train.py --data_path ./Phase2/nerf_synthetic/lego/ --n_rays_batch 16384      #
